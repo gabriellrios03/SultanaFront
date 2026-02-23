@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiService } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { Empresa } from '@/lib/types';
-import { Building2, ChevronRight, Loader2, LogOut } from 'lucide-react';
+import { ChevronRight, Loader2, LogOut } from 'lucide-react';
 
 export default function EmpresasPage() {
   const router = useRouter();
@@ -26,7 +25,7 @@ export default function EmpresasPage() {
       try {
         const data = await ApiService.getEmpresas();
         setEmpresas(data);
-      } catch (err) {
+      } catch {
         setError('Error al cargar las empresas');
       } finally {
         setIsLoading(false);
@@ -48,84 +47,78 @@ export default function EmpresasPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Cargando empresas...</p>
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+          <p className="text-sm text-muted-foreground">Cargando empresas...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-secondary/5">
-      <div className="container max-w-4xl mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-4xl font-bold text-balance mb-2">Seleccione una Empresa</h1>
-            <p className="text-muted-foreground text-lg">
-              Elija la empresa con la que desea trabajar
-            </p>
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card/80 backdrop-blur-sm">
+        <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
+              GS
+            </div>
+            <span className="text-sm font-semibold text-foreground">Grupo Sultana Connect</span>
           </div>
-          <Button variant="outline" onClick={handleLogout} className="gap-2">
-            <LogOut className="w-4 h-4" />
-            Cerrar Sesión
+          <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5 text-muted-foreground">
+            <LogOut className="h-4 w-4" />
+            <span className="hidden sm:inline">Salir</span>
           </Button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-4 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Selecciona una empresa</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Elige la empresa con la que deseas trabajar
+          </p>
         </div>
 
         {error && (
-          <div className="mb-6 p-4 rounded-lg bg-destructive/10 border border-destructive/20">
-            <p className="text-destructive font-medium">{error}</p>
+          <div className="mb-6 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3">
+            <p className="text-sm font-medium text-destructive">{error}</p>
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
           {empresas.map((empresa) => (
-            <Card
+            <button
               key={empresa.guidDsl}
-              className="cursor-pointer transition-all hover:shadow-lg hover:border-primary/50 group"
+              type="button"
+              className="group flex w-full items-center gap-4 rounded-lg border bg-card px-4 py-4 text-left transition-all hover:border-primary/40 hover:shadow-sm"
               onClick={() => handleSelectEmpresa(empresa)}
             >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                      <Building2 className="w-6 h-6 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-xl text-balance leading-tight">
-                        {empresa.nombre}
-                      </CardTitle>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-bold text-muted-foreground">
+                {empresa.nombre.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {empresa.nombre}
+                </p>
+                <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                  <span className="font-mono">{empresa.rfc}</span>
+                  <span>{'|'}</span>
+                  <span className="truncate">{empresa.baseDatos}</span>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">RFC:</span>
-                  <span className="font-medium font-mono">{empresa.rfc}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Base de Datos:</span>
-                  <span className="font-medium text-xs truncate max-w-[200px]">
-                    {empresa.baseDatos}
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+            </button>
           ))}
         </div>
 
         {empresas.length === 0 && !error && (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <Building2 className="w-16 h-16 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground text-lg">No hay empresas disponibles</p>
-            </CardContent>
-          </Card>
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <p className="text-sm text-muted-foreground">No hay empresas disponibles</p>
+          </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

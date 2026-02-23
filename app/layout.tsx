@@ -9,7 +9,7 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'Grupo Sultana Connect',
-  description: 'Sistema de gestión de egresos empresariales',
+  description: 'Gestion de egresos y envio a CONTPAQi',
   generator: 'v0.app',
   icons: {
     icon: [
