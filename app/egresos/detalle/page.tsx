@@ -66,6 +66,8 @@ export default function EgresoDetallePage() {
   const [xmlError, setXmlError] = useState('');
   const [isLoadingXml, setIsLoadingXml] = useState(false);
   const [xmlOpen, setXmlOpen] = useState(false);
+  const [subtotalFromXml, setSubtotalFromXml] = useState('');
+  const [taxesFromXml, setTaxesFromXml] = useState<Array<{ nombre: string; valor: string }>>([]);
 
   // CONTPAQi data
   const [conceptos, setConceptos] = useState<Record<string, unknown>[]>([]);
@@ -176,6 +178,67 @@ export default function EgresoDetallePage() {
     return '';
   };
 
+  // Extract subtotal from XML
+  const extractSubtotalFromXml = (value: unknown): string => {
+    const xmlString = getDisplayXml(value);
+    if (!xmlString || typeof xmlString !== 'string') return '';
+    
+    const match = xmlString.match(/subtotal\s*=\s*["']([^"']+)["']/i) || 
+                  xmlString.match(/<[^>]*subtotal[^>]*>([^<]+)<\/[^>]*>/i);
+    if (match && match[1]) {
+      return String(match[1]);
+    }
+    return '';
+  };
+
+  // Extract total taxes from XML with tax type details
+  const extractTaxesFromXml = (value: unknown): Array<{ nombre: string; valor: string }> => {
+    const xmlString = getDisplayXml(value);
+    if (!xmlString || typeof xmlString !== 'string') return [];
+    
+    const impuestosMap: Record<string, string> = {
+      '001': 'ISR',
+      '002': 'IVA',
+      '003': 'IEPS',
+    };
+    
+    const impuestos: Array<{ nombre: string; valor: string }> = [];
+    
+    // Extract Traslados (IVA, IEPS - normally trasladados to customer)
+    const trasladosRegex = /<Traslado[^>]+Impuesto="(\d+)"[^>]*Importe="([^"]+)"/gi;
+    let match;
+    while ((match = trasladosRegex.exec(xmlString)) !== null) {
+      const code = match[1];
+      const importe = match[2];
+      const nombre = impuestosMap[code] || code;
+      impuestos.push({ nombre, valor: importe });
+    }
+    
+    // Extract Retenciones (withholding taxes - ISR, IVA)
+    const retencionesRegex = /<Retencion[^>]+Impuesto="(\d+)"[^>]*Importe="([^"]+)"/gi;
+    while ((match = retencionesRegex.exec(xmlString)) !== null) {
+      const code = match[1];
+      const importe = match[2];
+      const nombre = `Retención ${impuestosMap[code] || code}`;
+      impuestos.push({ nombre, valor: importe });
+    }
+    
+    return impuestos;
+  };
+
+  // Extract subtotal and taxes from XML
+  useEffect(() => {
+    if (!xmlDetail) {
+      setSubtotalFromXml('');
+      setTaxesFromXml([]);
+      return;
+    }
+    const subtotal = extractSubtotalFromXml(xmlDetail);
+    const taxes = extractTaxesFromXml(xmlDetail);
+    setSubtotalFromXml(subtotal);
+    setTaxesFromXml(taxes);
+  }, [xmlDetail]);
+
   // Field formatting
   const formatFieldLabel = (key: string) => {
     if (FIELD_LABELS[key]) return FIELD_LABELS[key];
@@ -204,7 +267,7 @@ export default function EgresoDetallePage() {
 
   const getConceptoNombre = (item: Record<string, unknown>) => {
     const nombre = getFirstValue(item, [
-      'nombre', 'Nombre', 'concepto', 'Concepto', 'nombreConcepto', 'NombreConcepto',
+      'cNombreConcepto', 'CNombreConcepto', 'nombre', 'Nombre', 'concepto', 'Concepto', 'nombreConcepto', 'NombreConcepto',
       'descripcion', 'Descripcion',
     ]);
     if (nombre === undefined || nombre === null || nombre === '') return JSON.stringify(item);
@@ -231,7 +294,7 @@ export default function EgresoDetallePage() {
 
   const getProveedorRazonSocial = (item: Record<string, unknown>) => {
     const razon = getFirstValue(item, [
-      'razonSocial', 'RazonSocial', 'nombre', 'Nombre', 'nombreComercial', 'NombreComercial',
+      'crAzonSocial', 'CrAzonSocial', 'razonSocial', 'RazonSocial', 'nombre', 'Nombre', 'nombreComercial', 'NombreComercial',
     ]);
     if (razon === undefined || razon === null || razon === '') return 'Sin razon social';
     return String(razon);
@@ -444,6 +507,38 @@ export default function EgresoDetallePage() {
                 <DataCell label="RFC" value={formatCellValue(computed.rfc)} mono />
                 <DataCell label="UUID" value={formatCellValue(computed.uuid)} mono small />
               </div>
+              {(subtotalFromXml || taxesFromXml.length > 0) && (
+                <div className="border-t px-4 py-4">
+                  <div className="font-mono text-sm space-y-2">
+                    {/* Subtotal */}
+                    {subtotalFromXml && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Subtotal</span>
+                        <span className="text-foreground font-semibold">{formatTotalValue(subtotalFromXml)}</span>
+                      </div>
+                    )}
+                    
+                    {/* Individual Taxes */}
+                    {taxesFromXml.map((tax, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <span className="text-muted-foreground">+ {tax.nombre}</span>
+                        <span className="text-foreground font-semibold">{formatTotalValue(tax.valor)}</span>
+                      </div>
+                    ))}
+                    
+                    {/* Separator */}
+                    {(subtotalFromXml || taxesFromXml.length > 0) && (
+                      <div className="border-b border-dashed border-border my-1"></div>
+                    )}
+                    
+                    {/* Total */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-foreground font-semibold">= Total</span>
+                      <span className="text-lg font-bold text-primary">{formatTotalValue(computed.total)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* XML Detail - collapsible */}
@@ -677,7 +772,7 @@ export default function EgresoDetallePage() {
                           <span className="text-[10px] font-medium text-primary">Listo para enviar</span>
                         </div>
                         <div className="text-[10px] text-muted-foreground space-y-0.5">
-                          <p>Concepto: {selectedConceptoLabel}</p>
+                          <p>Concepto: {selectedConceptoCode ? `${selectedConceptoCode} - ${selectedConceptoLabel}` : selectedConceptoLabel}</p>
                           <p>Segmento: {selectedSegmento || '-'}</p>
                           <p>Sucursal: {selectedSucursal || '-'}</p>
                         </div>
