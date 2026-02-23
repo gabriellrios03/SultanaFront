@@ -67,7 +67,11 @@ export default function EgresoDetallePage() {
   const [isLoadingXml, setIsLoadingXml] = useState(false);
   const [xmlOpen, setXmlOpen] = useState(false);
   const [subtotalFromXml, setSubtotalFromXml] = useState('');
-  const [taxesFromXml, setTaxesFromXml] = useState<Array<{ nombre: string; valor: string }>>([]);
+  const [descuentoFromXml, setDescuentoFromXml] = useState('');
+  const [trasladosFromXml, setTrasladosFromXml] = useState<Array<{ nombre: string; tasa: string; valor: string }>>([]);
+  const [retencionesFromXml, setRetencionesFromXml] = useState<Array<{ nombre: string; valor: string }>>([]);
+  const [totalImpuestosTrasladados, setTotalImpuestosTrasladados] = useState('');
+  const [totalImpuestosRetenidos, setTotalImpuestosRetenidos] = useState('');
 
   // CONTPAQi data
   const [conceptos, setConceptos] = useState<Record<string, unknown>[]>([]);
@@ -191,52 +195,107 @@ export default function EgresoDetallePage() {
     return '';
   };
 
-  // Extract total taxes from XML with tax type details
-  const extractTaxesFromXml = (value: unknown): Array<{ nombre: string; valor: string }> => {
+  // Extract Descuento from XML
+  const extractDescuentoFromXml = (value: unknown): string => {
     const xmlString = getDisplayXml(value);
-    if (!xmlString || typeof xmlString !== 'string') return [];
-    
-    const impuestosMap: Record<string, string> = {
-      '001': 'ISR',
-      '002': 'IVA',
-      '003': 'IEPS',
-    };
-    
-    const impuestos: Array<{ nombre: string; valor: string }> = [];
-    
-    // Extract Traslados (IVA, IEPS - normally trasladados to customer)
-    const trasladosRegex = /<Traslado[^>]+Impuesto="(\d+)"[^>]*Importe="([^"]+)"/gi;
-    let match;
-    while ((match = trasladosRegex.exec(xmlString)) !== null) {
-      const code = match[1];
-      const importe = match[2];
-      const nombre = impuestosMap[code] || code;
-      impuestos.push({ nombre, valor: importe });
-    }
-    
-    // Extract Retenciones (withholding taxes - ISR, IVA)
-    const retencionesRegex = /<Retencion[^>]+Impuesto="(\d+)"[^>]*Importe="([^"]+)"/gi;
-    while ((match = retencionesRegex.exec(xmlString)) !== null) {
-      const code = match[1];
-      const importe = match[2];
-      const nombre = `Retención ${impuestosMap[code] || code}`;
-      impuestos.push({ nombre, valor: importe });
-    }
-    
-    return impuestos;
+    if (!xmlString || typeof xmlString !== 'string') return '';
+    // Match Descuento attribute on cfdi:Comprobante or similar root element
+    const match = xmlString.match(/Descuento\s*=\s*["']([^"']+)["']/i);
+    if (match && match[1]) return String(match[1]);
+    return '';
   };
 
-  // Extract subtotal and taxes from XML
+  const impuestosMap: Record<string, string> = {
+    '001': 'ISR',
+    '002': 'IVA',
+    '003': 'IEPS',
+  };
+
+  // Extract Traslados from XML with TasaOCuota
+  const extractTrasladosFromXml = (value: unknown): Array<{ nombre: string; tasa: string; valor: string }> => {
+    const xmlString = getDisplayXml(value);
+    if (!xmlString || typeof xmlString !== 'string') return [];
+
+    const traslados: Array<{ nombre: string; tasa: string; valor: string }> = [];
+    const trasladosRegex = /<(?:cfdi:)?Traslado\b([^>]*)\/?\s*>/gi;
+    let match;
+    while ((match = trasladosRegex.exec(xmlString)) !== null) {
+      const attrs = match[1];
+      const impuestoMatch = attrs.match(/Impuesto\s*=\s*["']([^"']+)["']/);
+      const importeMatch = attrs.match(/Importe\s*=\s*["']([^"']+)["']/);
+      const tasaMatch = attrs.match(/TasaOCuota\s*=\s*["']([^"']+)["']/);
+
+      if (impuestoMatch && importeMatch) {
+        const code = impuestoMatch[1];
+        const importe = importeMatch[1];
+        const tasa = tasaMatch ? tasaMatch[1] : '';
+        const nombre = impuestosMap[code] || `Impuesto ${code}`;
+        traslados.push({ nombre, tasa, valor: importe });
+      }
+    }
+    return traslados;
+  };
+
+  // Extract Retenciones from XML
+  const extractRetencionesFromXml = (value: unknown): Array<{ nombre: string; valor: string }> => {
+    const xmlString = getDisplayXml(value);
+    if (!xmlString || typeof xmlString !== 'string') return [];
+
+    const retenciones: Array<{ nombre: string; valor: string }> = [];
+    const retencionesRegex = /<(?:cfdi:)?Retencion\b([^>]*)\/?\s*>/gi;
+    let match;
+    while ((match = retencionesRegex.exec(xmlString)) !== null) {
+      const attrs = match[1];
+      const impuestoMatch = attrs.match(/Impuesto\s*=\s*["']([^"']+)["']/);
+      const importeMatch = attrs.match(/Importe\s*=\s*["']([^"']+)["']/);
+
+      if (impuestoMatch && importeMatch) {
+        const code = impuestoMatch[1];
+        const importe = importeMatch[1];
+        const nombre = impuestosMap[code] || `Impuesto ${code}`;
+        retenciones.push({ nombre, valor: importe });
+      }
+    }
+    return retenciones;
+  };
+
+  // Extract TotalImpuestosTrasladados and TotalImpuestosRetenidos
+  const extractImpuestosTotals = (value: unknown): { totalTrasladados: string; totalRetenidos: string } => {
+    const xmlString = getDisplayXml(value);
+    if (!xmlString || typeof xmlString !== 'string') return { totalTrasladados: '', totalRetenidos: '' };
+
+    const trasladosMatch = xmlString.match(/TotalImpuestosTrasladados\s*=\s*["']([^"']+)["']/i);
+    const retenidosMatch = xmlString.match(/TotalImpuestosRetenidos\s*=\s*["']([^"']+)["']/i);
+
+    return {
+      totalTrasladados: trasladosMatch ? trasladosMatch[1] : '',
+      totalRetenidos: retenidosMatch ? retenidosMatch[1] : '',
+    };
+  };
+
+  // Extract subtotal, descuento, traslados, retenciones from XML
   useEffect(() => {
     if (!xmlDetail) {
       setSubtotalFromXml('');
-      setTaxesFromXml([]);
+      setDescuentoFromXml('');
+      setTrasladosFromXml([]);
+      setRetencionesFromXml([]);
+      setTotalImpuestosTrasladados('');
+      setTotalImpuestosRetenidos('');
       return;
     }
     const subtotal = extractSubtotalFromXml(xmlDetail);
-    const taxes = extractTaxesFromXml(xmlDetail);
+    const descuento = extractDescuentoFromXml(xmlDetail);
+    const traslados = extractTrasladosFromXml(xmlDetail);
+    const retenciones = extractRetencionesFromXml(xmlDetail);
+    const totals = extractImpuestosTotals(xmlDetail);
+
     setSubtotalFromXml(subtotal);
-    setTaxesFromXml(taxes);
+    setDescuentoFromXml(descuento);
+    setTrasladosFromXml(traslados);
+    setRetencionesFromXml(retenciones);
+    setTotalImpuestosTrasladados(totals.totalTrasladados);
+    setTotalImpuestosRetenidos(totals.totalRetenidos);
   }, [xmlDetail]);
 
   // Field formatting
@@ -507,9 +566,9 @@ export default function EgresoDetallePage() {
                 <DataCell label="RFC" value={formatCellValue(computed.rfc)} mono />
                 <DataCell label="UUID" value={formatCellValue(computed.uuid)} mono small />
               </div>
-              {(subtotalFromXml || taxesFromXml.length > 0) && (
+              {(subtotalFromXml || trasladosFromXml.length > 0 || retencionesFromXml.length > 0 || descuentoFromXml) && (
                 <div className="border-t px-4 py-4">
-                  <div className="font-mono text-sm space-y-2">
+                  <div className="font-mono text-sm space-y-1.5">
                     {/* Subtotal */}
                     {subtotalFromXml && (
                       <div className="flex items-center justify-between">
@@ -517,23 +576,68 @@ export default function EgresoDetallePage() {
                         <span className="text-foreground font-semibold">{formatTotalValue(subtotalFromXml)}</span>
                       </div>
                     )}
-                    
-                    {/* Individual Taxes */}
-                    {taxesFromXml.map((tax, index) => (
-                      <div key={index} className="flex items-center justify-between">
-                        <span className="text-muted-foreground">+ {tax.nombre}</span>
-                        <span className="text-foreground font-semibold">{formatTotalValue(tax.valor)}</span>
+
+                    {/* Descuento */}
+                    {descuentoFromXml && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-red-500">- Descuento</span>
+                        <span className="text-red-500 font-semibold">{formatTotalValue(descuentoFromXml)}</span>
                       </div>
-                    ))}
-                    
-                    {/* Separator */}
-                    {(subtotalFromXml || taxesFromXml.length > 0) && (
-                      <div className="border-b border-dashed border-border my-1"></div>
                     )}
-                    
-                    {/* Total */}
-                    <div className="flex items-center justify-between">
-                      <span className="text-foreground font-semibold">= Total</span>
+
+                    {/* Traslados (IVA, IEPS, etc.) */}
+                    {trasladosFromXml.length > 0 && (
+                      <>
+                        <div className="border-b border-dashed border-border my-2" />
+                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground pt-0.5">
+                          Impuestos trasladados
+                        </p>
+                        {trasladosFromXml.map((tax, index) => {
+                          const tasaPercent = tax.tasa ? `${(parseFloat(tax.tasa) * 100).toFixed(2)}%` : '';
+                          return (
+                            <div key={`traslado-${index}`} className="flex items-center justify-between">
+                              <span className="text-muted-foreground">
+                                + {tax.nombre}{tasaPercent ? ` (${tasaPercent})` : ''}
+                              </span>
+                              <span className="text-foreground font-semibold">{formatTotalValue(tax.valor)}</span>
+                            </div>
+                          );
+                        })}
+                        {totalImpuestosTrasladados && (
+                          <div className="flex items-center justify-between text-xs pt-0.5">
+                            <span className="text-muted-foreground italic">Total trasladados</span>
+                            <span className="text-foreground font-medium">{formatTotalValue(totalImpuestosTrasladados)}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Retenciones (ISR, IVA retenido, etc.) */}
+                    {retencionesFromXml.length > 0 && (
+                      <>
+                        <div className="border-b border-dashed border-border my-2" />
+                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground pt-0.5">
+                          Retenciones
+                        </p>
+                        {retencionesFromXml.map((ret, index) => (
+                          <div key={`retencion-${index}`} className="flex items-center justify-between">
+                            <span className="text-orange-500">- Ret. {ret.nombre}</span>
+                            <span className="text-orange-500 font-semibold">{formatTotalValue(ret.valor)}</span>
+                          </div>
+                        ))}
+                        {totalImpuestosRetenidos && (
+                          <div className="flex items-center justify-between text-xs pt-0.5">
+                            <span className="text-muted-foreground italic">Total retenidos</span>
+                            <span className="text-foreground font-medium">{formatTotalValue(totalImpuestosRetenidos)}</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Separator and Total */}
+                    <div className="border-b-2 border-border my-2" />
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-foreground font-bold">Total</span>
                       <span className="text-lg font-bold text-primary">{formatTotalValue(computed.total)}</span>
                     </div>
                   </div>
