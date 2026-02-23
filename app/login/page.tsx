@@ -4,11 +4,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { ApiService } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { Building2, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,88 +24,87 @@ export default function LoginPage() {
 
     try {
       const response = await ApiService.login({ usuario, contrasena });
-      
+
       if (response.success) {
         setToken(response.token);
         router.push('/empresas');
       } else {
-        setError(response.message || 'Error al iniciar sesión');
+        setError(response.message || 'Error al iniciar sesion');
       }
-    } catch (err) {
-      setError('Error de conexión. Por favor intente nuevamente.');
+    } catch {
+      setError('Error de conexion. Intente nuevamente.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 p-4">
-      <Card className="w-full max-w-md shadow-xl border-2">
-        <CardHeader className="space-y-3 text-center">
-          <div className="mx-auto w-16 h-16 bg-primary rounded-2xl flex items-center justify-center shadow-lg">
-            <Building2 className="w-10 h-10 text-primary-foreground" />
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm space-y-8">
+        {/* Brand */}
+        <div className="text-center space-y-2">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg">
+            GS
           </div>
-          <CardTitle className="text-3xl font-bold text-balance">
+          <h1 className="text-xl font-bold tracking-tight text-foreground text-balance">
             Grupo Sultana Connect
-          </CardTitle>
-          <CardDescription className="text-base">
-            Ingrese sus credenciales para acceder al sistema
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="usuario" className="text-sm font-medium">
-                Usuario
-              </Label>
-              <Input
-                id="usuario"
-                type="email"
-                placeholder="usuario@ejemplo.com"
-                value={usuario}
-                onChange={(e) => setUsuario(e.target.value)}
-                required
-                disabled={isLoading}
-                className="h-11"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="contrasena" className="text-sm font-medium">
-                Contraseña
-              </Label>
-              <Input
-                id="contrasena"
-                type="password"
-                placeholder="••••••••"
-                value={contrasena}
-                onChange={(e) => setContrasena(e.target.value)}
-                required
-                disabled={isLoading}
-                className="h-11"
-              />
-            </div>
-            {error && (
-              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-                <p className="text-sm text-destructive font-medium">{error}</p>
-              </div>
-            )}
-            <Button 
-              type="submit" 
-              className="w-full h-11 text-base font-semibold"
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Ingresa tus credenciales para continuar
+          </p>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="usuario" className="text-xs font-medium">
+              Usuario
+            </Label>
+            <Input
+              id="usuario"
+              type="email"
+              placeholder="usuario@ejemplo.com"
+              value={usuario}
+              onChange={(e) => setUsuario(e.target.value)}
+              required
               disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Iniciando sesión...
-                </>
-              ) : (
-                'Iniciar Sesión'
-              )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              className="h-10 bg-card"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="contrasena" className="text-xs font-medium">
+              Contrasena
+            </Label>
+            <Input
+              id="contrasena"
+              type="password"
+              placeholder="••••••••"
+              value={contrasena}
+              onChange={(e) => setContrasena(e.target.value)}
+              required
+              disabled={isLoading}
+              className="h-10 bg-card"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+              <p className="text-xs text-destructive font-medium">{error}</p>
+            </div>
+          )}
+
+          <Button type="submit" className="w-full h-10" disabled={isLoading}>
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Iniciando sesion...
+              </>
+            ) : (
+              'Iniciar Sesion'
+            )}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }
