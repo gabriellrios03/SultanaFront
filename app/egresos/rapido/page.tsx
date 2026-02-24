@@ -41,6 +41,7 @@ export default function EgresosRapidoPage() {
   const [showSent, setShowSent] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isQuickSending, setIsQuickSending] = useState(false);
+  const [isLoadingAllData, setIsLoadingAllData] = useState(false);
   const [quickSendSummary, setQuickSendSummary] = useState<
     | {
         sent: number;
@@ -304,8 +305,19 @@ export default function EgresosRapidoPage() {
     });
   };
 
-  const loadDataForRow = async (rowId: string) => {
-    await calculatePreviewForRow(rowId);
+  const loadDataForAllVisible = async () => {
+    if (filteredEgresos.length === 0) return;
+    setIsLoadingAllData(true);
+    try {
+      for (const { row, sourceIndex } of filteredEgresos) {
+        const rowId = getRowId(row, sourceIndex);
+        if (!previewData[rowId]) {
+          await calculatePreviewForRow(rowId);
+        }
+      }
+    } finally {
+      setIsLoadingAllData(false);
+    }
   };
 
   const getEgresoByRowId = (rowId: string) => {
@@ -700,6 +712,21 @@ export default function EgresosRapidoPage() {
               )}
               <span className="hidden sm:inline">Actualizar</span>
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadDataForAllVisible}
+              disabled={isLoadingAllData || filteredEgresos.length === 0}
+              className="h-9 gap-1.5"
+              title="Carga datos de régimen, segmento, sucursal y método de pago para todos los registros visibles"
+            >
+              {isLoadingAllData ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">Cargar datos</span>
+            </Button>
           </div>
         </div>
 
@@ -747,7 +774,7 @@ export default function EgresosRapidoPage() {
           </div>
         ) : filteredEgresos.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border bg-card">
-            <table className="w-full min-w-[1200px] text-sm">
+            <table className="w-full min-w-[920px] text-sm">
               <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2">
@@ -761,9 +788,6 @@ export default function EgresosRapidoPage() {
                   <th className="px-3 py-2">Regimen fiscal</th>
                   <th className="px-3 py-2">Segmento</th>
                   <th className="px-3 py-2">Sucursal</th>
-                  <th className="w-24 px-3 py-2">
-                    <span className="sr-only">Acciones</span>
-                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -795,23 +819,6 @@ export default function EgresosRapidoPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
                         {preview?.sucursal || (preview?.status === 'loading' ? 'Cargando...' : '-')}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => loadDataForRow(rowId)}
-                          disabled={preview?.status === 'loading'}
-                          className="gap-1 h-7 text-xs"
-                          title="Cargar datos de régimen, segmento y sucursal"
-                        >
-                          {preview?.status === 'loading' ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Download className="h-3 w-3" />
-                          )}
-                          {preview ? 'OK' : 'Datos'}
-                        </Button>
                       </td>
                     </tr>
                   );
