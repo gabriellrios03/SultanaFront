@@ -867,7 +867,7 @@ export default function EgresoDetallePage() {
                 <DataCell label="UUID" value={formatCellValue(computed.uuid)} mono small />
               </div>
               <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2">
-                <DataCell label="Regimen fiscal" value={getRegimenFiscalDescription(cfdiVisual.receptor.regimen)} small />
+                <DataCell label="Regimen fiscal" value={getRegimenFiscalDescription(cfdiVisual.emisor.regimen)} small />
                 <DataCell label="Metodo de pago" value={cfdiVisual.comprobante.metodoPago || '-'} mono />
               </div>
               {(subtotalFromXml || totalImpuestosTrasladados || totalImpuestosRetenidos || descuentoFromXml) && (
