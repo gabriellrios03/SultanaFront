@@ -28,6 +28,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Download,
 } from 'lucide-react';
 
 export default function EgresosRapidoPage() {
@@ -57,6 +58,7 @@ export default function EgresosRapidoPage() {
         sucursal?: string;
         segmento?: string;
         regimenFiscal?: string;
+        metodoPago?: string;
         status: 'loading' | 'success' | 'error';
         error?: string;
       }
@@ -300,16 +302,10 @@ export default function EgresosRapidoPage() {
       }
       return next;
     });
+  };
 
-    if (checked) {
-      calculatePreviewForRow(rowId);
-    } else {
-      setPreviewData((prev) => {
-        const next = { ...prev };
-        delete next[rowId];
-        return next;
-      });
-    }
+  const loadDataForRow = async (rowId: string) => {
+    await calculatePreviewForRow(rowId);
   };
 
   const getEgresoByRowId = (rowId: string) => {
@@ -418,6 +414,9 @@ export default function EgresosRapidoPage() {
         return;
       }
 
+      const comprobanteAttrs = getTagAttributes(xmlString, 'Comprobante');
+      const metodoPago = getAttrValue(comprobanteAttrs, 'MetodoPago') || '';
+
       setPreviewData((prev) => ({
         ...prev,
         [rowId]: {
@@ -427,6 +426,7 @@ export default function EgresosRapidoPage() {
           sucursal,
           segmento,
           regimenFiscal,
+          metodoPago,
         },
       }));
     } catch (err) {
@@ -447,7 +447,6 @@ export default function EgresosRapidoPage() {
         const rowId = getRowId(row, sourceIndex);
         if (checked) {
           next.add(rowId);
-          calculatePreviewForRow(rowId);
         } else {
           next.delete(rowId);
         }
@@ -748,7 +747,7 @@ export default function EgresosRapidoPage() {
           </div>
         ) : filteredEgresos.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border bg-card">
-            <table className="w-full min-w-[920px] text-sm">
+            <table className="w-full min-w-[1200px] text-sm">
               <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2">
@@ -758,9 +757,13 @@ export default function EgresosRapidoPage() {
                   <th className="px-3 py-2">Folio</th>
                   <th className="px-3 py-2">Razon social</th>
                   <th className="px-3 py-2">Monto</th>
+                  <th className="px-3 py-2">Metodo pago</th>
                   <th className="px-3 py-2">Regimen fiscal</th>
                   <th className="px-3 py-2">Segmento</th>
                   <th className="px-3 py-2">Sucursal</th>
+                  <th className="w-24 px-3 py-2">
+                    <span className="sr-only">Acciones</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -782,6 +785,9 @@ export default function EgresosRapidoPage() {
                       <td className="px-3 py-2">{formatCellValue(fields.emisor)}</td>
                       <td className="px-3 py-2 font-medium">{formatTotalValue(fields.total)}</td>
                       <td className="px-3 py-2 font-mono text-xs">
+                        {preview?.metodoPago || (preview?.status === 'loading' ? 'Cargando...' : '-')}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
                         {preview?.regimenFiscal || (preview?.status === 'loading' ? 'Cargando...' : '-')}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
@@ -789,6 +795,23 @@ export default function EgresosRapidoPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
                         {preview?.sucursal || (preview?.status === 'loading' ? 'Cargando...' : '-')}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => loadDataForRow(rowId)}
+                          disabled={preview?.status === 'loading'}
+                          className="gap-1 h-7 text-xs"
+                          title="Cargar datos de régimen, segmento y sucursal"
+                        >
+                          {preview?.status === 'loading' ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Download className="h-3 w-3" />
+                          )}
+                          {preview ? 'OK' : 'Datos'}
+                        </Button>
                       </td>
                     </tr>
                   );
