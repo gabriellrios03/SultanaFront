@@ -488,13 +488,12 @@ export default function EgresoDetallePage() {
     loadContpaqiData();
   }, [detail, selectedEmpresa]);
 
-  const receptorRegimenFiscal = useMemo(() => {
+  const emisorRegimenFiscal = useMemo(() => {
     const xmlString = getDisplayXml(xmlDetail);
     if (!xmlString) return '';
-    const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
+    const emisorAttrs = getTagAttributes(xmlString, 'Emisor');
     return (
-      getAttrValue(receptorAttrs, 'RegimenFiscalReceptor') ||
-      getAttrValue(receptorAttrs, 'RegimenFiscal') ||
+      getAttrValue(emisorAttrs, 'RegimenFiscal') ||
       ''
     );
   }, [xmlDetail]);
@@ -519,10 +518,10 @@ export default function EgresoDetallePage() {
     if (categoriaLower !== 'rentas') return null;
     return getRentasDefaultsForEmpresa(
       selectedEmpresa?.baseDatos ?? '',
-      receptorRegimenFiscal,
+      emisorRegimenFiscal,
       hasIva08
     );
-  }, [categoriaLower, selectedEmpresa?.baseDatos, receptorRegimenFiscal, hasIva08]);
+  }, [categoriaLower, selectedEmpresa?.baseDatos, emisorRegimenFiscal, hasIva08]);
 
   // Auto-select first concepto
   useEffect(() => {

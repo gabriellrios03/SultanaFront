@@ -363,10 +363,9 @@ export default function EgresosRapidoPage() {
         return;
       }
 
-      const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
+      const emisorAttrs = getTagAttributes(xmlString, 'Emisor');
       const regimenFiscal =
-        getAttrValue(receptorAttrs, 'RegimenFiscalReceptor') ||
-        getAttrValue(receptorAttrs, 'RegimenFiscal') ||
+        getAttrValue(emisorAttrs, 'RegimenFiscal') ||
         '';
 
       const globalImpuestos = getGlobalImpuestosSection(xmlString);
@@ -513,11 +512,10 @@ export default function EgresosRapidoPage() {
           continue;
         }
 
-        const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
+        const emisorAttrs = getTagAttributes(xmlString, 'Emisor');
         const comprobanteAttrs = getTagAttributes(xmlString, 'Comprobante');
         const regimenFiscal =
-          getAttrValue(receptorAttrs, 'RegimenFiscalReceptor') ||
-          getAttrValue(receptorAttrs, 'RegimenFiscal') ||
+          getAttrValue(emisorAttrs, 'RegimenFiscal') ||
           '';
 
         const globalImpuestos = getGlobalImpuestosSection(xmlString);
