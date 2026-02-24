@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { ApiService } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
@@ -29,7 +30,6 @@ import {
   LogOut,
   RefreshCw,
   Search,
-  XCircle,
 } from 'lucide-react';
 
 export default function EgresosPage() {
@@ -41,10 +41,54 @@ export default function EgresosPage() {
   const [comercialFilter, setComercialFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDate, setSelectedDate] = useState(() => {
+  const [showSent, setShowSent] = useState(true);
+
+  const getDefaultWeekRange = () => {
     const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+    const dayOfWeek = today.getDay();
+    const diffToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const toDateString = (date: Date) => date.toISOString().split('T')[0];
+    return { from: toDateString(monday), to: toDateString(sunday) };
+  };
+
+  const [fromDate, setFromDate] = useState(() => getDefaultWeekRange().from);
+  const [toDate, setToDate] = useState(() => getDefaultWeekRange().to);
+
+  const getDateStorageKey = (empresaGuid?: string) =>
+    empresaGuid ? `egresosDateRange:${empresaGuid}` : 'egresosDateRange';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!selectedEmpresa?.guidDsl) return;
+    const stored = sessionStorage.getItem(getDateStorageKey(selectedEmpresa.guidDsl));
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored) as { from?: string; to?: string };
+        if (parsed.from) setFromDate(parsed.from);
+        if (parsed.to) setToDate(parsed.to);
+        return;
+      } catch {
+        // ignore stored value
+      }
+    }
+    const fallback = getDefaultWeekRange();
+    setFromDate(fallback.from);
+    setToDate(fallback.to);
+  }, [selectedEmpresa?.guidDsl]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!selectedEmpresa?.guidDsl) return;
+    if (!fromDate || !toDate) return;
+    sessionStorage.setItem(
+      getDateStorageKey(selectedEmpresa.guidDsl),
+      JSON.stringify({ from: fromDate, to: toDate })
+    );
+  }, [fromDate, toDate, selectedEmpresa?.guidDsl]);
 
   const categoryOptions = useMemo(() => {
     const categories = new Set<string>();
@@ -73,8 +117,9 @@ export default function EgresosPage() {
           comercialFilter === 'all' ||
           (comercialFilter === 'yes' ? isComercialSent : !isComercialSent);
         const matchesCategory = categoryFilter === 'all' || category === categoryFilter;
+        const matchesSentToggle = showSent || !isComercialSent;
 
-        if (!searchQuery.trim()) return matchesComercial && matchesCategory;
+        if (!searchQuery.trim()) return matchesComercial && matchesCategory && matchesSentToggle;
 
         const q = searchQuery.toLowerCase();
         const matchesSearch =
@@ -83,9 +128,9 @@ export default function EgresosPage() {
           formatCellValue(fields.uuid).toLowerCase().includes(q) ||
           fields.serie.toLowerCase().includes(q);
 
-        return matchesComercial && matchesCategory && matchesSearch;
+        return matchesComercial && matchesCategory && matchesSentToggle && matchesSearch;
       }),
-    [egresos, comercialFilter, categoryFilter, searchQuery, selectedEmpresa?.rfc]
+    [egresos, comercialFilter, categoryFilter, searchQuery, selectedEmpresa?.rfc, showSent]
   );
 
   const sentCount = useMemo(
@@ -113,7 +158,8 @@ export default function EgresosPage() {
       const data = await ApiService.getEgresos(
         selectedEmpresa.guidDsl,
         selectedEmpresa.rfc,
-        selectedDate
+        fromDate,
+        toDate
       );
       setEgresos(data);
     } catch {
@@ -140,15 +186,20 @@ export default function EgresosPage() {
         __folioCalculado: resolvedFolio,
       };
       sessionStorage.setItem('selectedEgresoDetail', JSON.stringify(detailPayload));
+      localStorage.setItem('selectedEgresoDetail', JSON.stringify(detailPayload));
+    }
+    if (typeof window !== 'undefined') {
+      window.open('/egresos/detalle', '_blank', 'noopener');
+      return;
     }
     router.push('/egresos/detalle');
   };
 
   useEffect(() => {
-    if (selectedEmpresa && selectedDate) {
+    if (selectedEmpresa && fromDate && toDate) {
       fetchEgresos();
     }
-  }, [selectedDate]);
+  }, [fromDate, toDate]);
 
   const handleLogout = () => {
     logout();
@@ -199,7 +250,7 @@ export default function EgresosPage() {
         </div>
 
         {/* Stats strip */}
-        <div className="mb-6 grid grid-cols-3 gap-3">
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <button
             type="button"
             onClick={() => setComercialFilter('all')}
@@ -236,6 +287,13 @@ export default function EgresosPage() {
             <span className="text-2xl font-bold text-foreground">{pendingCount}</span>
             <span className="text-xs text-muted-foreground">Pendientes</span>
           </button>
+          <div className="flex flex-col items-center rounded-lg border border-dashed px-4 py-3 text-center bg-card/50">
+            <span className="text-2xl font-bold text-muted-foreground">-</span>
+            <span className="text-xs text-muted-foreground">Cancelados</span>
+            <span className="mt-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+              En Desarrollo
+            </span>
+          </div>
         </div>
 
         {/* Filters row */}
@@ -265,17 +323,33 @@ export default function EgresosPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center gap-2 rounded-md border bg-card px-3 py-1.5">
+              <Switch checked={showSent} onCheckedChange={setShowSent} />
+              <span className="text-xs text-muted-foreground">Mostrar enviados a CONTPAQi</span>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <Calendar className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <Input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="h-9 w-40 pl-9 bg-card font-mono text-sm"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <Input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="h-9 w-40 pl-9 bg-card font-mono text-sm"
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">a</span>
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <Input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="h-9 w-40 pl-9 bg-card font-mono text-sm"
+                />
+              </div>
             </div>
             <Button
               variant="outline"
@@ -290,6 +364,9 @@ export default function EgresosPage() {
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
               <span className="hidden sm:inline">Actualizar</span>
+            </Button>
+            <Button size="sm" onClick={() => router.push('/egresos/rapido')} className="h-9">
+              Envio rapido
             </Button>
           </div>
         </div>

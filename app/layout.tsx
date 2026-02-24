@@ -10,7 +10,7 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'Grupo Sultana Connect',
   description: 'Gestion de egresos y envio a CONTPAQi',
-  generator: 'v0.app',
+  generator: 'Sultana',
   icons: {
     icon: [
       {

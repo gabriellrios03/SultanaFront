@@ -48,8 +48,8 @@ export class ApiService {
     return response.json();
   }
 
-  static async getEgresos(guid: string, rfc: string, day: string): Promise<Egreso[]> {
-    const url = `${API_BASE_URL}/AddEgresos?guid=${encodeURIComponent(guid)}&day=${encodeURIComponent(day)}&rfc=${encodeURIComponent(rfc)}`;
+  static async getEgresos(guid: string, rfc: string, from: string, to: string): Promise<Egreso[]> {
+    const url = `${API_BASE_URL}/AddEgresos?Guid=${encodeURIComponent(guid)}&From=${encodeURIComponent(from)}&To=${encodeURIComponent(to)}&Rfc=${encodeURIComponent(rfc)}`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -119,6 +119,40 @@ export class ApiService {
     }
 
     return response.json();
+  }
+
+  static async getProductos(databaseName: string): Promise<unknown[]> {
+    const url = `${API_BASE_URL}/Productos?databaseName=${encodeURIComponent(databaseName)}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getAuthHeader(),
+    });
+
+    if (!response.ok) {
+      throw new Error('Error al obtener productos');
+    }
+
+    return response.json();
+  }
+
+  static async crearDocumento(payload: Record<string, unknown>): Promise<unknown> {
+    const response = await fetch(`${API_BASE_URL}/Documentos`, {
+      method: 'POST',
+      headers: this.getAuthHeader(),
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error('Error al enviar documento a CONTPAQi');
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return response.json();
+    }
+
+    return response.text();
   }
 
   static logout() {

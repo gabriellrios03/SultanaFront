@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, ChevronDown, Code2, FileCheck, Loader2, Send, Tag } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Code2, FileCheck, Loader2, Send, Tag, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -20,7 +21,10 @@ import {
   formatDateOnly,
   formatCellValue,
   getComercialStatusFromRow,
+  getCategoryFromRow,
 } from '@/lib/egreso-helpers';
+import { getRentasDefaultsForEmpresa } from '@/lib/ArrendamientoSettings';
+import { getRegimenFiscalDescription } from '@/lib/regimen-fiscal-catalog';
 
 type EgresoDetail = Record<string, unknown>;
 
@@ -68,27 +72,36 @@ export default function EgresoDetallePage() {
   const [xmlOpen, setXmlOpen] = useState(false);
   const [subtotalFromXml, setSubtotalFromXml] = useState('');
   const [descuentoFromXml, setDescuentoFromXml] = useState('');
-  const [trasladosFromXml, setTrasladosFromXml] = useState<Array<{ nombre: string; tasa: string; valor: string }>>([]);
-  const [retencionesFromXml, setRetencionesFromXml] = useState<Array<{ nombre: string; valor: string }>>([]);
   const [totalImpuestosTrasladados, setTotalImpuestosTrasladados] = useState('');
   const [totalImpuestosRetenidos, setTotalImpuestosRetenidos] = useState('');
 
   // CONTPAQi data
   const [conceptos, setConceptos] = useState<Record<string, unknown>[]>([]);
+  const [productos, setProductos] = useState<Record<string, unknown>[]>([]);
   const [proveedoresRfc, setProveedoresRfc] = useState<Record<string, unknown>[]>([]);
   const [proveedoresTodos, setProveedoresTodos] = useState<Record<string, unknown>[]>([]);
   const [isLoadingContpaqi, setIsLoadingContpaqi] = useState(false);
   const [contpaqiError, setContpaqiError] = useState('');
 
   const [selectedConcepto, setSelectedConcepto] = useState('');
+  const [selectedProducto, setSelectedProducto] = useState('');
   const [selectedProveedorRfc, setSelectedProveedorRfc] = useState('');
   const [selectedProveedorManual, setSelectedProveedorManual] = useState('');
   const [providerTab, setProviderTab] = useState<'rfc' | 'todos'>('rfc');
+  const [conceptoQuery, setConceptoQuery] = useState('');
+  const [productoQuery, setProductoQuery] = useState('');
+  const [proveedorRfcQuery, setProveedorRfcQuery] = useState('');
+  const [proveedorTodosQuery, setProveedorTodosQuery] = useState('');
+  const [manualSegmento, setManualSegmento] = useState('');
+  const [manualSucursal, setManualSucursal] = useState('');
+  const [isSendingContpaqi, setIsSendingContpaqi] = useState(false);
+  const [sendContpaqiError, setSendContpaqiError] = useState('');
+  const [sendContpaqiSuccess, setSendContpaqiSuccess] = useState('');
 
   // Load detail from sessionStorage
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const stored = sessionStorage.getItem('selectedEgresoDetail');
+    const stored = sessionStorage.getItem('selectedEgresoDetail') || localStorage.getItem('selectedEgresoDetail');
     if (!stored) return;
     try {
       const parsed = JSON.parse(stored) as EgresoDetail;
@@ -205,65 +218,13 @@ export default function EgresoDetallePage() {
     return '';
   };
 
-  const impuestosMap: Record<string, string> = {
-    '001': 'ISR',
-    '002': 'IVA',
-    '003': 'IEPS',
-  };
-
-  // Extract Traslados from XML with TasaOCuota
-  const extractTrasladosFromXml = (value: unknown): Array<{ nombre: string; tasa: string; valor: string }> => {
-    const xmlString = getDisplayXml(value);
-    if (!xmlString || typeof xmlString !== 'string') return [];
-
-    const traslados: Array<{ nombre: string; tasa: string; valor: string }> = [];
-    const trasladosRegex = /<(?:cfdi:)?Traslado\b([^>]*)\/?\s*>/gi;
-    let match;
-    while ((match = trasladosRegex.exec(xmlString)) !== null) {
-      const attrs = match[1];
-      const impuestoMatch = attrs.match(/Impuesto\s*=\s*["']([^"']+)["']/);
-      const importeMatch = attrs.match(/Importe\s*=\s*["']([^"']+)["']/);
-      const tasaMatch = attrs.match(/TasaOCuota\s*=\s*["']([^"']+)["']/);
-
-      if (impuestoMatch && importeMatch) {
-        const code = impuestoMatch[1];
-        const importe = importeMatch[1];
-        const tasa = tasaMatch ? tasaMatch[1] : '';
-        const nombre = impuestosMap[code] || `Impuesto ${code}`;
-        traslados.push({ nombre, tasa, valor: importe });
-      }
-    }
-    return traslados;
-  };
-
-  // Extract Retenciones from XML
-  const extractRetencionesFromXml = (value: unknown): Array<{ nombre: string; valor: string }> => {
-    const xmlString = getDisplayXml(value);
-    if (!xmlString || typeof xmlString !== 'string') return [];
-
-    const retenciones: Array<{ nombre: string; valor: string }> = [];
-    const retencionesRegex = /<(?:cfdi:)?Retencion\b([^>]*)\/?\s*>/gi;
-    let match;
-    while ((match = retencionesRegex.exec(xmlString)) !== null) {
-      const attrs = match[1];
-      const impuestoMatch = attrs.match(/Impuesto\s*=\s*["']([^"']+)["']/);
-      const importeMatch = attrs.match(/Importe\s*=\s*["']([^"']+)["']/);
-
-      if (impuestoMatch && importeMatch) {
-        const code = impuestoMatch[1];
-        const importe = importeMatch[1];
-        const nombre = impuestosMap[code] || `Impuesto ${code}`;
-        retenciones.push({ nombre, valor: importe });
-      }
-    }
-    return retenciones;
-  };
-
-  // Extract TotalImpuestosTrasladados and TotalImpuestosRetenidos
+  // Extract TotalImpuestosTrasladados and TotalImpuestosRetenidos from global nodo <cfdi:Impuestos>
+  // IMPORTANTE: Solo usamos los totales globales del SAT, NO los impuestos por concepto
   const extractImpuestosTotals = (value: unknown): { totalTrasladados: string; totalRetenidos: string } => {
     const xmlString = getDisplayXml(value);
     if (!xmlString || typeof xmlString !== 'string') return { totalTrasladados: '', totalRetenidos: '' };
 
+    // Buscar en el nodo global <cfdi:Impuestos> (no en los de cada concepto)
     const trasladosMatch = xmlString.match(/TotalImpuestosTrasladados\s*=\s*["']([^"']+)["']/i);
     const retenidosMatch = xmlString.match(/TotalImpuestosRetenidos\s*=\s*["']([^"']+)["']/i);
 
@@ -273,27 +234,21 @@ export default function EgresoDetallePage() {
     };
   };
 
-  // Extract subtotal, descuento, traslados, retenciones from XML
+  // Extract subtotal, descuento, and total impuestos from XML (global level only per CFDI 4.0)
   useEffect(() => {
     if (!xmlDetail) {
       setSubtotalFromXml('');
       setDescuentoFromXml('');
-      setTrasladosFromXml([]);
-      setRetencionesFromXml([]);
       setTotalImpuestosTrasladados('');
       setTotalImpuestosRetenidos('');
       return;
     }
     const subtotal = extractSubtotalFromXml(xmlDetail);
     const descuento = extractDescuentoFromXml(xmlDetail);
-    const traslados = extractTrasladosFromXml(xmlDetail);
-    const retenciones = extractRetencionesFromXml(xmlDetail);
     const totals = extractImpuestosTotals(xmlDetail);
 
     setSubtotalFromXml(subtotal);
     setDescuentoFromXml(descuento);
-    setTrasladosFromXml(traslados);
-    setRetencionesFromXml(retenciones);
     setTotalImpuestosTrasladados(totals.totalTrasladados);
     setTotalImpuestosRetenidos(totals.totalRetenidos);
   }, [xmlDetail]);
@@ -313,6 +268,44 @@ export default function EgresoDetallePage() {
     if (value === null || value === undefined || value === '') return '-';
     if (typeof value === 'object') return JSON.stringify(value, null, 2);
     return String(value);
+  };
+
+  const matchesQuery = (label: string, query: string) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return true;
+    return label.toLowerCase().includes(normalizedQuery);
+  };
+
+  const getTagAttributes = (xml: string, tag: string) => {
+    const match = xml.match(new RegExp(`<\s*(?:cfdi:)?${tag}\\b([^>]*)>`, 'i'));
+    return match ? match[1] : '';
+  };
+
+  const getAttrValue = (attrs: string, attr: string) => {
+    const match = attrs.match(new RegExp(`${attr}\\s*=\\s*["']([^"']+)["']`, 'i'));
+    return match ? match[1] : '';
+  };
+
+  const getComprobanteAttr = (xml: string, attr: string) => {
+    const attrs = getTagAttributes(xml, 'Comprobante');
+    return getAttrValue(attrs, attr);
+  };
+
+  const getGlobalImpuestosSection = (xml: string) => {
+    const matches = Array.from(xml.matchAll(/<(?:cfdi:)?Impuestos\b[\s\S]*?<\/(?:cfdi:)?Impuestos>/gi));
+    return matches.length > 0 ? matches[matches.length - 1][0] : '';
+  };
+
+  const formatTasaPercent = (tasa: string) => {
+    const value = Number(tasa);
+    if (!Number.isFinite(value)) return '';
+    return `${(value * 100).toFixed(2)}%`;
+  };
+
+  const impuestosMap: Record<string, string> = {
+    '001': 'ISR',
+    '002': 'IVA',
+    '003': 'IEPS',
   };
 
   // Select value helpers
@@ -337,6 +330,24 @@ export default function EgresoDetallePage() {
     const code = getFirstValue(item, [
       'cCodigoConcepto', 'CCodigoConcepto', 'codigoConcepto', 'CodigoConcepto',
       'codigo', 'Codigo', 'idConcepto', 'IdConcepto',
+    ]);
+    if (code === undefined || code === null || code === '') return '';
+    return String(code);
+  };
+
+  const getProductoNombre = (item: Record<string, unknown>) => {
+    const nombre = getFirstValue(item, [
+      'cNombreProducto', 'CNombreProducto', 'cnombreproducto', 'nombreProducto', 'NombreProducto', 'nombre', 'Nombre',
+      'descripcion', 'Descripcion',
+    ]);
+    if (nombre === undefined || nombre === null || nombre === '') return JSON.stringify(item);
+    return String(nombre);
+  };
+
+  const getProductoCode = (item: Record<string, unknown>) => {
+    const code = getFirstValue(item, [
+      'cCodigoProducto', 'CCodigoProducto', 'ccodigoproducto', 'codigoProducto', 'CodigoProducto', 'codigo', 'Codigo',
+      'idProducto', 'IdProducto',
     ]);
     if (code === undefined || code === null || code === '') return '';
     return String(code);
@@ -367,13 +378,13 @@ export default function EgresoDetallePage() {
 
   const getProveedorSegmento = (item: Record<string, unknown>) => {
     const segmento = getFirstValue(item, ['segmento', 'Segmento', 'cSegmento', 'CSegmento']);
-    if (segmento === undefined || segmento === null || segmento === '') return 'Sin segmento';
+    if (segmento === undefined || segmento === null || segmento === '') return '';
     return String(segmento);
   };
 
   const getProveedorSucursal = (item: Record<string, unknown>) => {
     const sucursal = getFirstValue(item, ['sucursal', 'Sucursal', 'cSucursal', 'CSucursal']);
-    if (sucursal === undefined || sucursal === null || sucursal === '') return 'Sin sucursal';
+    if (sucursal === undefined || sucursal === null || sucursal === '') return '';
     return String(sucursal);
   };
 
@@ -406,6 +417,15 @@ export default function EgresoDetallePage() {
   };
 
   const computed = getComputedFields();
+  const categoria = detail ? getCategoryFromRow(detail) : 'Sin categoria';
+  const categoriaLower = categoria.toLowerCase();
+  const getCategoriaClasses = (value: string) => {
+    const normalized = value.toLowerCase();
+    if (normalized.includes('servicio')) return 'border-primary/40 text-primary bg-primary/10';
+    if (normalized.includes('compra')) return 'border-amber-500/40 text-amber-600 bg-amber-500/10';
+    if (normalized.includes('gasto')) return 'border-emerald-500/40 text-emerald-600 bg-emerald-500/10';
+    return 'border-border text-muted-foreground bg-muted/30';
+  };
 
   // Detail entries for the collapsible full detail
   const getDetailEntries = (row: EgresoDetail) => {
@@ -430,8 +450,9 @@ export default function EgresoDetallePage() {
       setContpaqiError('');
       setIsLoadingContpaqi(true);
 
-      const [conceptosResult, proveedoresRfcResult, proveedoresTodosResult] = await Promise.allSettled([
+      const [conceptosResult, productosResult, proveedoresRfcResult, proveedoresTodosResult] = await Promise.allSettled([
         ApiService.getConceptosCompras(databaseName),
+        ApiService.getProductos(databaseName),
         ApiService.getProveedores(databaseName, rfcProveedor ? String(rfcProveedor) : undefined),
         ApiService.getProveedores(databaseName),
       ]);
@@ -441,6 +462,12 @@ export default function EgresoDetallePage() {
       } else {
         setConceptos([]);
         setContpaqiError('No se pudieron cargar los datos de CONTPAQi');
+      }
+
+      if (productosResult.status === 'fulfilled') {
+        setProductos((productosResult.value ?? []) as Record<string, unknown>[]);
+      } else {
+        setProductos([]);
       }
 
       if (proveedoresRfcResult.status === 'fulfilled') {
@@ -461,12 +488,57 @@ export default function EgresoDetallePage() {
     loadContpaqiData();
   }, [detail, selectedEmpresa]);
 
+  const receptorRegimenFiscal = useMemo(() => {
+    const xmlString = getDisplayXml(xmlDetail);
+    if (!xmlString) return '';
+    const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
+    return (
+      getAttrValue(receptorAttrs, 'RegimenFiscalReceptor') ||
+      getAttrValue(receptorAttrs, 'RegimenFiscal') ||
+      ''
+    );
+  }, [xmlDetail]);
+
+  const hasIva08 = useMemo(() => {
+    const xmlString = getDisplayXml(xmlDetail);
+    if (!xmlString) return false;
+    const globalImpuestos = getGlobalImpuestosSection(xmlString);
+    if (!globalImpuestos) return false;
+    const traslados = Array.from(globalImpuestos.matchAll(/<(?:cfdi:)?Traslado\b([^>]*)>/gi));
+    return traslados.some((match) => {
+      const attrs = match[1] || '';
+      const impuesto = getAttrValue(attrs, 'Impuesto');
+      const tasa = getAttrValue(attrs, 'TasaOCuota');
+      const rate = Number(tasa);
+      const isIva = impuesto === '002' || impuesto.toUpperCase() === 'IVA';
+      return isIva && Number.isFinite(rate) && Math.abs(rate - 0.08) < 0.0001;
+    });
+  }, [xmlDetail]);
+
+  const rentasDefaults = useMemo(() => {
+    if (categoriaLower !== 'rentas') return null;
+    return getRentasDefaultsForEmpresa(
+      selectedEmpresa?.baseDatos ?? '',
+      receptorRegimenFiscal,
+      hasIva08
+    );
+  }, [categoriaLower, selectedEmpresa?.baseDatos, receptorRegimenFiscal, hasIva08]);
+
   // Auto-select first concepto
   useEffect(() => {
+    if (categoriaLower === 'rentas') return;
     if (selectedConcepto || conceptos.length === 0) return;
     const firstItem = conceptos[0] as Record<string, unknown>;
     setSelectedConcepto(getSelectValue(firstItem, 'concepto', 0));
-  }, [conceptos, selectedConcepto]);
+  }, [categoriaLower, conceptos, selectedConcepto]);
+
+  // Auto-select first producto
+  useEffect(() => {
+    if (categoriaLower === 'rentas') return;
+    if (selectedProducto || productos.length === 0) return;
+    const firstItem = productos[0] as Record<string, unknown>;
+    setSelectedProducto(getSelectValue(firstItem, 'producto', 0));
+  }, [categoriaLower, productos, selectedProducto]);
 
   // Auto-select first proveedor by RFC if available
   useEffect(() => {
@@ -486,6 +558,20 @@ export default function EgresoDetallePage() {
 
   const selectedSegmento = selectedProviderRecord ? getProveedorSegmento(selectedProviderRecord) : '';
   const selectedSucursal = selectedProviderRecord ? getProveedorSucursal(selectedProviderRecord) : '';
+  const displaySegmento = selectedSegmento || manualSegmento;
+  const displaySucursal = selectedSucursal || manualSucursal;
+
+  useEffect(() => {
+    if (manualSegmento === '' && selectedSegmento) {
+      setManualSegmento(selectedSegmento);
+    }
+  }, [manualSegmento, selectedSegmento]);
+
+  useEffect(() => {
+    if (manualSucursal === '' && selectedSucursal) {
+      setManualSucursal(selectedSucursal);
+    }
+  }, [manualSucursal, selectedSucursal]);
 
   const selectedConceptoRecord = conceptos.find((item, index) => {
     const option = item as Record<string, unknown>;
@@ -495,7 +581,198 @@ export default function EgresoDetallePage() {
   const selectedConceptoLabel = selectedConceptoRecord ? getConceptoNombre(selectedConceptoRecord) : '';
   const selectedConceptoCode = selectedConceptoRecord ? getConceptoCode(selectedConceptoRecord) : '';
 
-  const canSend = !!selectedConcepto && !!activeProvider;
+  const findSelectValueByCode = (
+    items: Record<string, unknown>[],
+    code: string,
+    kind: 'concepto' | 'producto',
+    getCode: (item: Record<string, unknown>) => string
+  ) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const option = items[index] as Record<string, unknown>;
+      if (getCode(option) === code) {
+        return getSelectValue(option, kind, index);
+      }
+    }
+    return '';
+  };
+
+  const selectedProductoRecord = productos.find((item, index) => {
+    const option = item as Record<string, unknown>;
+    return getSelectValue(option, 'producto', index) === selectedProducto;
+  }) as Record<string, unknown> | undefined;
+
+  const selectedProductoCode = selectedProductoRecord ? getProductoCode(selectedProductoRecord) : '';
+
+  const canSend =
+    !!selectedConcepto &&
+    !!activeProvider &&
+    displaySegmento.trim() !== '' &&
+    displaySucursal.trim() !== '';
+
+  useEffect(() => {
+    if (categoriaLower !== 'rentas') return;
+    if (!rentasDefaults) return;
+
+    if (!selectedConcepto && rentasDefaults.concepto) {
+      const value = findSelectValueByCode(conceptos, rentasDefaults.concepto, 'concepto', getConceptoCode);
+      if (value) setSelectedConcepto(value);
+    }
+
+    if (!selectedProducto && rentasDefaults.producto) {
+      const value = findSelectValueByCode(productos, rentasDefaults.producto, 'producto', getProductoCode);
+      if (value) setSelectedProducto(value);
+    }
+  }, [
+    categoriaLower,
+    rentasDefaults,
+    conceptos,
+    productos,
+    selectedConcepto,
+    selectedProducto,
+  ]);
+  const normalizeNumber = (value: string | number | undefined) => {
+    if (value === undefined || value === null || value === '') return 0;
+    if (typeof value === 'number') return value;
+    const cleaned = value.replace(/[^0-9.-]/g, '');
+    const parsed = Number(cleaned);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const normalizeDate = (value: string) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString();
+  };
+
+  const subtotalValue = subtotalFromXml || computed.total;
+  const contpaqiPayload = useMemo(() => {
+    const folioNumber = normalizeNumber(computed.folio);
+    return {
+      empresaRutaOrName: selectedEmpresa?.baseDatos || '',
+      codConcepto: selectedConceptoCode || selectedConceptoLabel || '',
+      serie: computed.serie || '',
+      folio: typeof folioNumber === 'number' ? folioNumber : 0,
+      fecha: normalizeDate(computed.fecha) || normalizeDate(formatDateOnly(computed.fecha)) || '',
+      codigoCteProv: selectedProviderRecord ? getProveedorCodigoCliente(selectedProviderRecord) : '',
+      referencia: displaySucursal || '',
+      asociarUUID: computed.uuid || '',
+      asociarBaseDb: selectedEmpresa?.guidDsl || '',
+      movimientos: [
+        {
+          unidades: 1,
+          precio: normalizeNumber(subtotalValue),
+          codProdSer: selectedProductoCode || '',
+          referencia: displaySucursal || '',
+          segmento: displaySegmento || '',
+        },
+      ],
+    };
+  }, [
+    computed.folio,
+    computed.serie,
+    computed.fecha,
+    computed.uuid,
+    displaySegmento,
+    displaySucursal,
+    selectedConceptoCode,
+    selectedConceptoLabel,
+    selectedProductoCode,
+    selectedEmpresa?.baseDatos,
+    selectedEmpresa?.guidDsl,
+    selectedProviderRecord,
+    subtotalValue,
+  ]);
+
+  const handleSendContpaqi = async () => {
+    if (!canSend || computed.isSent) return;
+    setIsSendingContpaqi(true);
+    setSendContpaqiError('');
+    setSendContpaqiSuccess('');
+    try {
+      await ApiService.crearDocumento(contpaqiPayload as Record<string, unknown>);
+      setSendContpaqiSuccess('Documento enviado a CONTPAQi');
+    } catch {
+      setSendContpaqiError('No se pudo enviar el documento a CONTPAQi');
+    } finally {
+      setIsSendingContpaqi(false);
+    }
+  };
+  const cfdiVisual = useMemo(() => {
+    const xmlString = getDisplayXml(xmlDetail);
+    if (!xmlString) {
+      return {
+        emisor: { rfc: '-', nombre: '-', regimen: '-' },
+        receptor: { rfc: '-', nombre: '-', usoCfdi: '-', domicilio: '-', regimen: '-' },
+        comprobante: { subtotal: '-', descuento: '-', total: '-', fecha: '-', metodoPago: '-' },
+        conceptos: [],
+        traslados: [],
+        retenciones: [],
+      };
+    }
+
+    const emisorAttrs = getTagAttributes(xmlString, 'Emisor');
+    const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
+    const comprobanteAttrs = getTagAttributes(xmlString, 'Comprobante');
+    const globalImpuestos = getGlobalImpuestosSection(xmlString);
+
+    const conceptos = Array.from(xmlString.matchAll(/<(?:cfdi:)?Concepto\b([^>]*)>/gi)).map((match) => {
+      const attrs = match[1] || '';
+      return {
+        clave: getAttrValue(attrs, 'ClaveProdServ'),
+        cantidad: getAttrValue(attrs, 'Cantidad'),
+        unidad: getAttrValue(attrs, 'Unidad') || getAttrValue(attrs, 'ClaveUnidad'),
+        descripcion: getAttrValue(attrs, 'Descripcion'),
+        valorUnitario: getAttrValue(attrs, 'ValorUnitario'),
+        importe: getAttrValue(attrs, 'Importe'),
+        descuento: getAttrValue(attrs, 'Descuento'),
+      };
+    });
+
+    const traslados = Array.from(globalImpuestos.matchAll(/<(?:cfdi:)?Traslado\b([^>]*)>/gi)).map((match) => {
+      const attrs = match[1] || '';
+      const impuesto = getAttrValue(attrs, 'Impuesto');
+      return {
+        impuesto: impuestosMap[impuesto] || impuesto,
+        tasa: formatTasaPercent(getAttrValue(attrs, 'TasaOCuota')),
+        importe: getAttrValue(attrs, 'Importe'),
+      };
+    });
+
+    const retenciones = Array.from(globalImpuestos.matchAll(/<(?:cfdi:)?Retencion\b([^>]*)>/gi)).map((match) => {
+      const attrs = match[1] || '';
+      const impuesto = getAttrValue(attrs, 'Impuesto');
+      return {
+        impuesto: impuestosMap[impuesto] || impuesto,
+        importe: getAttrValue(attrs, 'Importe'),
+      };
+    });
+
+    return {
+      emisor: {
+        rfc: getAttrValue(emisorAttrs, 'Rfc') || '-',
+        nombre: getAttrValue(emisorAttrs, 'Nombre') || '-',
+        regimen: getAttrValue(emisorAttrs, 'RegimenFiscal') || '-',
+      },
+      receptor: {
+        rfc: getAttrValue(receptorAttrs, 'Rfc') || '-',
+        nombre: getAttrValue(receptorAttrs, 'Nombre') || '-',
+        usoCfdi: getAttrValue(receptorAttrs, 'UsoCFDI') || '-',
+        domicilio: getAttrValue(receptorAttrs, 'DomicilioFiscalReceptor') || '-',
+        regimen: getAttrValue(receptorAttrs, 'RegimenFiscalReceptor') || getAttrValue(receptorAttrs, 'RegimenFiscal') || '-',
+      },
+      comprobante: {
+        subtotal: getAttrValue(comprobanteAttrs, 'SubTotal') || getAttrValue(comprobanteAttrs, 'Subtotal') || '-',
+        descuento: getAttrValue(comprobanteAttrs, 'Descuento') || '-',
+        total: getAttrValue(comprobanteAttrs, 'Total') || '-',
+        fecha: getAttrValue(comprobanteAttrs, 'Fecha') || '-',
+        metodoPago: getAttrValue(comprobanteAttrs, 'MetodoPago') || '-',
+      },
+      conceptos,
+      traslados,
+      retenciones,
+    };
+  }, [xmlDetail]);
 
   if (!detail) {
     return (
@@ -505,8 +782,20 @@ export default function EgresoDetallePage() {
           <p className="text-sm text-muted-foreground">
             No hay un egreso seleccionado.
           </p>
-          <Button variant="outline" onClick={() => router.push('/egresos')}>
-            Ir a egresos
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.close();
+                if (!window.closed) {
+                  router.back();
+                }
+              } else {
+                router.back();
+              }
+            }}
+          >
+            Cerrar
           </Button>
         </div>
       </div>
@@ -522,11 +811,20 @@ export default function EgresoDetallePage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push('/egresos')}
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.close();
+                  if (!window.closed) {
+                    router.back();
+                  }
+                } else {
+                  router.back();
+                }
+              }}
               className="gap-1.5 text-muted-foreground"
             >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">Egresos</span>
+              <X className="h-4 w-4" />
+              <span className="hidden sm:inline">Cerrar</span>
             </Button>
             <Separator orientation="vertical" className="h-5" />
             <span className="text-sm font-semibold text-foreground truncate max-w-[200px] sm:max-w-none">
@@ -553,8 +851,11 @@ export default function EgresoDetallePage() {
           <div className="flex-1 space-y-4">
             {/* Key data card */}
             <div className="rounded-lg border bg-card">
-              <div className="border-b px-4 py-3">
+              <div className="border-b px-4 py-3 flex items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-foreground">Datos del egreso</h2>
+                <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${getCategoriaClasses(categoria)}`}>
+                  {categoria}
+                </Badge>
               </div>
               <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
                 <DataCell label="Serie" value={computed.serie} mono />
@@ -566,7 +867,11 @@ export default function EgresoDetallePage() {
                 <DataCell label="RFC" value={formatCellValue(computed.rfc)} mono />
                 <DataCell label="UUID" value={formatCellValue(computed.uuid)} mono small />
               </div>
-              {(subtotalFromXml || trasladosFromXml.length > 0 || retencionesFromXml.length > 0 || descuentoFromXml) && (
+              <div className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2">
+                <DataCell label="Regimen fiscal" value={getRegimenFiscalDescription(cfdiVisual.receptor.regimen)} small />
+                <DataCell label="Metodo de pago" value={cfdiVisual.comprobante.metodoPago || '-'} mono />
+              </div>
+              {(subtotalFromXml || totalImpuestosTrasladados || totalImpuestosRetenidos || descuentoFromXml) && (
                 <div className="border-t px-4 py-4">
                   <div className="font-mono text-sm space-y-1.5">
                     {/* Subtotal */}
@@ -585,52 +890,25 @@ export default function EgresoDetallePage() {
                       </div>
                     )}
 
-                    {/* Traslados (IVA, IEPS, etc.) */}
-                    {trasladosFromXml.length > 0 && (
+                    {/* Total Traslados (global del CFDI, no por concepto) */}
+                    {totalImpuestosTrasladados && (
                       <>
                         <div className="border-b border-dashed border-border my-2" />
-                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground pt-0.5">
-                          Impuestos trasladados
-                        </p>
-                        {trasladosFromXml.map((tax, index) => {
-                          const tasaPercent = tax.tasa ? `${(parseFloat(tax.tasa) * 100).toFixed(2)}%` : '';
-                          return (
-                            <div key={`traslado-${index}`} className="flex items-center justify-between">
-                              <span className="text-muted-foreground">
-                                + {tax.nombre}{tasaPercent ? ` (${tasaPercent})` : ''}
-                              </span>
-                              <span className="text-foreground font-semibold">{formatTotalValue(tax.valor)}</span>
-                            </div>
-                          );
-                        })}
-                        {totalImpuestosTrasladados && (
-                          <div className="flex items-center justify-between text-xs pt-0.5">
-                            <span className="text-muted-foreground italic">Total trasladados</span>
-                            <span className="text-foreground font-medium">{formatTotalValue(totalImpuestosTrasladados)}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">+ IVA (16%)</span>
+                          <span className="text-foreground font-semibold">{formatTotalValue(totalImpuestosTrasladados)}</span>
+                        </div>
                       </>
                     )}
 
-                    {/* Retenciones (ISR, IVA retenido, etc.) */}
-                    {retencionesFromXml.length > 0 && (
+                    {/* Total Retenciones (global del CFDI, no por concepto) */}
+                    {totalImpuestosRetenidos && (
                       <>
                         <div className="border-b border-dashed border-border my-2" />
-                        <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground pt-0.5">
-                          Retenciones
-                        </p>
-                        {retencionesFromXml.map((ret, index) => (
-                          <div key={`retencion-${index}`} className="flex items-center justify-between">
-                            <span className="text-orange-500">- Ret. {ret.nombre}</span>
-                            <span className="text-orange-500 font-semibold">{formatTotalValue(ret.valor)}</span>
-                          </div>
-                        ))}
-                        {totalImpuestosRetenidos && (
-                          <div className="flex items-center justify-between text-xs pt-0.5">
-                            <span className="text-muted-foreground italic">Total retenidos</span>
-                            <span className="text-foreground font-medium">{formatTotalValue(totalImpuestosRetenidos)}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-orange-500">- Retenciones</span>
+                          <span className="text-orange-500 font-semibold">{formatTotalValue(totalImpuestosRetenidos)}</span>
+                        </div>
                       </>
                     )}
 
@@ -682,6 +960,135 @@ export default function EgresoDetallePage() {
               </div>
             </Collapsible>
 
+            {/* CFDI Visual - collapsible */}
+            <Collapsible>
+              <div className="rounded-lg border bg-card">
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-accent/50 transition-colors rounded-lg"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Tag className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-semibold text-foreground">Vista CFDI 4.0</span>
+                    </div>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="border-t px-4 py-4 space-y-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Emisor</p>
+                        <p className="text-sm font-semibold text-foreground truncate">{cfdiVisual.emisor.nombre}</p>
+                        <p className="text-xs text-muted-foreground font-mono">RFC: {cfdiVisual.emisor.rfc}</p>
+                        <p className="text-xs text-muted-foreground">Regimen: {cfdiVisual.emisor.regimen}</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Receptor</p>
+                        <p className="text-sm font-semibold text-foreground truncate">{cfdiVisual.receptor.nombre}</p>
+                        <p className="text-xs text-muted-foreground font-mono">RFC: {cfdiVisual.receptor.rfc}</p>
+                        <p className="text-xs text-muted-foreground">Uso CFDI: {cfdiVisual.receptor.usoCfdi}</p>
+                        <p className="text-xs text-muted-foreground">Domicilio: {cfdiVisual.receptor.domicilio}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Serie</p>
+                        <p className="text-xs font-mono text-foreground">{computed.serie || '-'}</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Folio</p>
+                        <p className="text-xs font-mono text-foreground">{computed.folio || '-'}</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">UUID</p>
+                        <p className="text-xs font-mono text-foreground truncate" title={formatCellValue(computed.uuid)}>
+                          {formatCellValue(computed.uuid)}
+                        </p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Fecha timbrado</p>
+                        <p className="text-xs font-mono text-foreground">{formatCellValue(cfdiVisual.comprobante.fecha)}</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border overflow-hidden">
+                      <div className="bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+                        Conceptos
+                      </div>
+                      <div className="divide-y">
+                        {cfdiVisual.conceptos.length === 0 ? (
+                          <div className="px-3 py-3 text-xs text-muted-foreground">-</div>
+                        ) : (
+                          cfdiVisual.conceptos.map((concepto, index) => (
+                            <div key={`concepto-${index}`} className="px-3 py-2 grid grid-cols-1 gap-2 sm:grid-cols-5">
+                              <div className="sm:col-span-2">
+                                <p className="text-xs text-muted-foreground">Descripcion</p>
+                                <p className="text-sm text-foreground">{concepto.descripcion || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Cantidad</p>
+                                <p className="text-sm font-mono text-foreground">{concepto.cantidad || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Valor unitario</p>
+                                <p className="text-sm font-mono text-foreground">{concepto.valorUnitario || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Importe</p>
+                                <p className="text-sm font-mono text-foreground">{concepto.importe || '-'}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border px-3 py-3 space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Impuestos globales</p>
+                      {cfdiVisual.traslados.length === 0 && cfdiVisual.retenciones.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">-</p>
+                      ) : (
+                        <>
+                          {cfdiVisual.traslados.map((tax, index) => (
+                            <div key={`traslado-${index}`} className="flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">
+                                {tax.impuesto}{tax.tasa ? ` (${tax.tasa})` : ''}
+                              </span>
+                              <span className="text-xs font-mono text-foreground">{tax.importe || '-'}</span>
+                            </div>
+                          ))}
+                          {cfdiVisual.retenciones.map((tax, index) => (
+                            <div key={`retencion-${index}`} className="flex items-center justify-between">
+                              <span className="text-xs text-muted-foreground">Retencion {tax.impuesto}</span>
+                              <span className="text-xs font-mono text-foreground">{tax.importe || '-'}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Subtotal</p>
+                        <p className="text-sm font-mono text-foreground">{cfdiVisual.comprobante.subtotal}</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Descuento</p>
+                        <p className="text-sm font-mono text-foreground">{cfdiVisual.comprobante.descuento}</p>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2">
+                        <p className="text-[10px] text-muted-foreground">Total</p>
+                        <p className="text-sm font-mono text-foreground">{cfdiVisual.comprobante.total}</p>
+                      </div>
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </div>
+            </Collapsible>
+
             {/* Full detail - collapsible */}
             <Collapsible>
               <div className="rounded-lg border bg-card">
@@ -701,7 +1108,16 @@ export default function EgresoDetallePage() {
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="border-t divide-y">
+                  <div className="border-t">
+                    <div className="px-4 py-3 border-b">
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Preview CONTPAQi
+                      </p>
+                      <pre className="mt-2 max-h-64 overflow-y-auto rounded-md border bg-muted/40 px-3 py-2 text-[11px] leading-5 text-muted-foreground whitespace-pre-wrap break-all">
+                        {JSON.stringify(contpaqiPayload, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="divide-y">
                     {getDetailEntries(detail).map(([key, value]) => (
                       <div key={key} className="flex gap-4 px-4 py-2">
                         <span className="w-40 shrink-0 text-xs font-medium text-muted-foreground">
@@ -712,6 +1128,7 @@ export default function EgresoDetallePage() {
                         </span>
                       </div>
                     ))}
+                    </div>
                   </div>
                 </CollapsibleContent>
               </div>
@@ -735,6 +1152,18 @@ export default function EgresoDetallePage() {
                   </div>
                 )}
 
+                {sendContpaqiError && (
+                  <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {sendContpaqiError}
+                  </div>
+                )}
+
+                {sendContpaqiSuccess && (
+                  <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-600">
+                    {sendContpaqiSuccess}
+                  </div>
+                )}
+
                 {isLoadingContpaqi ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -745,18 +1174,67 @@ export default function EgresoDetallePage() {
                     <div className="space-y-1.5">
                       <Label className="text-xs">Concepto</Label>
                       <Select value={selectedConcepto} onValueChange={setSelectedConcepto}>
-                        <SelectTrigger className="h-9 bg-background text-sm">
-                          <SelectValue placeholder="Selecciona concepto" />
+                        <SelectTrigger className="h-9 bg-background text-sm overflow-hidden">
+                          <SelectValue className="truncate" placeholder="Selecciona concepto" />
                         </SelectTrigger>
                         <SelectContent>
+                          <div className="px-2 pb-2">
+                            <Input
+                              value={conceptoQuery}
+                              onChange={(event) => setConceptoQuery(event.target.value)}
+                              placeholder="Buscar por nombre o codigo"
+                              className="h-8 bg-background text-xs"
+                              onKeyDown={(event) => event.stopPropagation()}
+                            />
+                          </div>
                           {conceptos.map((item, index) => {
                             const option = item as Record<string, unknown>;
                             const value = getSelectValue(option, 'concepto', index);
                             const label = getConceptoNombre(option);
                             const code = getConceptoCode(option);
+                            const displayLabel = code ? `${code} - ${label}` : label;
+                            if (!matchesQuery(displayLabel, conceptoQuery)) return null;
                             return (
                               <SelectItem key={`${value}-${index}`} value={value}>
-                                {code ? `${code} - ${label}` : label}
+                                <span className="block max-w-full truncate" title={displayLabel}>
+                                  {displayLabel}
+                                </span>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Producto */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Producto</Label>
+                      <Select value={selectedProducto} onValueChange={setSelectedProducto}>
+                        <SelectTrigger className="h-9 bg-background text-sm overflow-hidden">
+                          <SelectValue className="truncate" placeholder="Selecciona producto" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <div className="px-2 pb-2">
+                            <Input
+                              value={productoQuery}
+                              onChange={(event) => setProductoQuery(event.target.value)}
+                              placeholder="Buscar por nombre o codigo"
+                              className="h-8 bg-background text-xs"
+                              onKeyDown={(event) => event.stopPropagation()}
+                            />
+                          </div>
+                          {productos.map((item, index) => {
+                            const option = item as Record<string, unknown>;
+                            const value = getSelectValue(option, 'producto', index);
+                            const label = getProductoNombre(option);
+                            const code = getProductoCode(option);
+                            const displayLabel = code ? `${code} - ${label}` : label;
+                            if (!matchesQuery(displayLabel, productoQuery)) return null;
+                            return (
+                              <SelectItem key={`${value}-${index}`} value={value}>
+                                <span className="block max-w-full truncate" title={displayLabel}>
+                                  {displayLabel}
+                                </span>
                               </SelectItem>
                             );
                           })}
@@ -802,17 +1280,29 @@ export default function EgresoDetallePage() {
                             setProviderTab('rfc');
                           }}
                         >
-                          <SelectTrigger className="h-9 bg-background text-sm">
-                            <SelectValue placeholder="Selecciona proveedor" />
+                          <SelectTrigger className="h-9 bg-background text-sm overflow-hidden">
+                            <SelectValue className="truncate" placeholder="Selecciona proveedor" />
                           </SelectTrigger>
                           <SelectContent>
+                            <div className="px-2 pb-2">
+                              <Input
+                                value={proveedorRfcQuery}
+                                onChange={(event) => setProveedorRfcQuery(event.target.value)}
+                                placeholder="Buscar por nombre o codigo"
+                                className="h-8 bg-background text-xs"
+                                onKeyDown={(event) => event.stopPropagation()}
+                              />
+                            </div>
                             {proveedoresRfc.map((item, index) => {
                               const option = item as Record<string, unknown>;
                               const value = getSelectValue(option, 'prov-rfc', index);
                               const label = getProveedorLabel(option);
+                              if (!matchesQuery(label, proveedorRfcQuery)) return null;
                               return (
                                 <SelectItem key={`${value}-${index}`} value={value}>
-                                  {label}
+                                  <span className="block max-w-full truncate" title={label}>
+                                    {label}
+                                  </span>
                                 </SelectItem>
                               );
                             })}
@@ -826,17 +1316,29 @@ export default function EgresoDetallePage() {
                             setProviderTab('todos');
                           }}
                         >
-                          <SelectTrigger className="h-9 bg-background text-sm">
-                            <SelectValue placeholder="Selecciona proveedor" />
+                          <SelectTrigger className="h-9 bg-background text-sm overflow-hidden">
+                            <SelectValue className="truncate" placeholder="Selecciona proveedor" />
                           </SelectTrigger>
                           <SelectContent>
+                            <div className="px-2 pb-2">
+                              <Input
+                                value={proveedorTodosQuery}
+                                onChange={(event) => setProveedorTodosQuery(event.target.value)}
+                                placeholder="Buscar por nombre o codigo"
+                                className="h-8 bg-background text-xs"
+                                onKeyDown={(event) => event.stopPropagation()}
+                              />
+                            </div>
                             {proveedoresTodos.map((item, index) => {
                               const option = item as Record<string, unknown>;
                               const value = getSelectValue(option, 'prov-all', index);
                               const label = getProveedorLabel(option);
+                              if (!matchesQuery(label, proveedorTodosQuery)) return null;
                               return (
                                 <SelectItem key={`${value}-${index}`} value={value}>
-                                  {label}
+                                  <span className="block max-w-full truncate" title={label}>
+                                    {label}
+                                  </span>
                                 </SelectItem>
                               );
                             })}
@@ -855,15 +1357,21 @@ export default function EgresoDetallePage() {
                       <div className="grid grid-cols-2 gap-2">
                         <div className="rounded-md border bg-muted/50 px-3 py-2">
                           <p className="text-[10px] text-muted-foreground">Segmento</p>
-                          <p className="text-xs font-medium text-foreground truncate">
-                            {selectedSegmento || '-'}
-                          </p>
+                          <Input
+                            value={manualSegmento}
+                            onChange={(event) => setManualSegmento(event.target.value)}
+                            placeholder={selectedSegmento ? 'Editar segmento' : 'Escribe segmento'}
+                            className="h-7 bg-background text-xs"
+                          />
                         </div>
                         <div className="rounded-md border bg-muted/50 px-3 py-2">
                           <p className="text-[10px] text-muted-foreground">Sucursal</p>
-                          <p className="text-xs font-medium text-foreground truncate">
-                            {selectedSucursal || '-'}
-                          </p>
+                          <Input
+                            value={manualSucursal}
+                            onChange={(event) => setManualSucursal(event.target.value)}
+                            placeholder={selectedSucursal ? 'Editar sucursal' : 'Escribe sucursal'}
+                            className="h-7 bg-background text-xs"
+                          />
                         </div>
                       </div>
                     </div>
@@ -877,15 +1385,19 @@ export default function EgresoDetallePage() {
                         </div>
                         <div className="text-[10px] text-muted-foreground space-y-0.5">
                           <p>Concepto: {selectedConceptoCode ? `${selectedConceptoCode} - ${selectedConceptoLabel}` : selectedConceptoLabel}</p>
-                          <p>Segmento: {selectedSegmento || '-'}</p>
-                          <p>Sucursal: {selectedSucursal || '-'}</p>
+                          <p>Segmento: {displaySegmento || '-'}</p>
+                          <p>Sucursal: {displaySucursal || '-'}</p>
                         </div>
                       </div>
                     )}
 
-                    <Button className="w-full gap-2" disabled={!canSend}>
-                      <Send className="h-4 w-4" />
-                      Enviar a CONTPAQi
+                    <Button
+                      className="w-full gap-2"
+                      disabled={!canSend || computed.isSent || isSendingContpaqi}
+                      onClick={handleSendContpaqi}
+                    >
+                      {isSendingContpaqi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      {computed.isSent ? 'Enviada a CONTPAQi' : 'Enviar a CONTPAQi'}
                     </Button>
                   </>
                 )}
