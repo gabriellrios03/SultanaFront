@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ApiService } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { Empresa } from '@/lib/types';
-import { ChevronRight, Loader2, LogOut } from 'lucide-react';
+import { ChevronRight, Loader2, LogOut, Settings } from 'lucide-react';
 
 export default function EmpresasPage() {
   const router = useRouter();
@@ -66,10 +66,22 @@ export default function EmpresasPage() {
             </div>
             <span className="text-sm font-semibold text-foreground">Grupo Sultana Connect</span>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5 text-muted-foreground">
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Salir</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => router.push('/admin')}
+              className="gap-1.5 text-muted-foreground"
+              title="Panel de administración"
+            >
+              <Settings className="h-4 w-4" />
+              <span className="hidden sm:inline">Admin</span>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1.5 text-muted-foreground">
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Salir</span>
+            </Button>
+          </div>
         </div>
       </header>
 
