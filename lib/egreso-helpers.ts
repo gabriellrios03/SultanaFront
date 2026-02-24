@@ -81,7 +81,7 @@ export const getFolioFromUuid = (value: unknown) => {
   if (!digits) return '-';
   const withoutLeadingZeros = digits.replace(/^0+/, '');
   if (!withoutLeadingZeros) return '-';
-  return withoutLeadingZeros.slice(0, 3) || '-';
+  return withoutLeadingZeros.slice(0, 4) || '-';
 };
 
 export const getComercialStatusFromRow = (row: Record<string, unknown>) => {
