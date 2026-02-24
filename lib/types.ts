@@ -9,6 +9,17 @@ export interface LoginResponse {
   token: string;
 }
 
+export interface RegisterCredentials {
+  usuario: string;
+  contrasena: string;
+  rol: string;
+}
+
+export interface RegisterResponse {
+  success: boolean;
+  message: string;
+}
+
 export interface Empresa {
   nombre: string;
   baseDatos: string;

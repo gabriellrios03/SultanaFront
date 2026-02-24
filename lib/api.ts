@@ -1,4 +1,4 @@
-import type { LoginCredentials, LoginResponse, Empresa, Egreso } from './types';
+import type { LoginCredentials, LoginResponse, RegisterCredentials, RegisterResponse, Empresa, Egreso } from './types';
 
 const API_BASE_URL = 'https://notable-special-caiman.ngrok-free.app/api';
 
@@ -153,6 +153,25 @@ export class ApiService {
     }
 
     return response.text();
+  }
+
+  static async register(credentials: RegisterCredentials): Promise<RegisterResponse> {
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'accept': '*/*',
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+      },
+      body: JSON.stringify(credentials),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || 'Error al registrar usuario');
+    }
+
+    return response.json();
   }
 
   static logout() {
