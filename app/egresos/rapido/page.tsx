@@ -58,6 +58,7 @@ export default function EgresosRapidoPage() {
         producto?: string;
         sucursal?: string;
         segmento?: string;
+        tasaRetencionIVA?: string;
         regimenFiscal?: string;
         metodoPago?: string;
         status: 'loading' | 'success' | 'error';
@@ -216,8 +217,55 @@ export default function EgresosRapidoPage() {
   };
 
   const getGlobalImpuestosSection = (xml: string) => {
-    const matches = Array.from(xml.matchAll(/<(?:cfdi:)?Impuestos\b[\s\S]*?<\/(?:cfdi:)?Impuestos>/gi));
+    const matches = Array.from(
+      xml.matchAll(/<(?:[a-zA-Z_][\w.-]*:)?Impuestos\b[\s\S]*?<\/(?:[a-zA-Z_][\w.-]*:)?Impuestos>/gi)
+    );
     return matches.length > 0 ? matches[matches.length - 1][0] : '';
+  };
+
+  const formatXmlRateToPercent = (tasaRaw: string) => {
+    const cleaned = String(tasaRaw || '').trim();
+    if (!cleaned) return '';
+
+    const value = Number(cleaned);
+    if (!Number.isFinite(value)) return '';
+
+    if (Math.abs(value) <= 1) {
+      const decimalPart = cleaned.split('.')[1] || '';
+      const scaledDecimals = Math.max(0, decimalPart.length - 2);
+      const scaled = (value * 100).toFixed(scaledDecimals).replace(/\.0+$|(?<=\.[0-9]*?)0+$/g, '').replace(/\.$/, '');
+      return `${scaled}%`;
+    }
+
+    const normalized = cleaned.replace(/\.0+$|(?<=\.[0-9]*?)0+$/g, '').replace(/\.$/, '');
+    return `${normalized}%`;
+  };
+
+  const getRetencionesFromXml = (xml: string) => {
+    if (!xml) return [] as Array<{ impuesto: string; tasa: string; impuestoCodigo: string }>;
+    return Array.from(xml.matchAll(/<(?:[a-zA-Z_][\w.-]*:)?Retencion\b([^>]*)\/?>/gi)).map((match) => {
+      const attrs = match[1] || '';
+      const impuestoCodigo = getAttrValue(attrs, 'Impuesto');
+      return {
+        impuestoCodigo,
+        impuesto: impuestoCodigo === '002' ? 'IVA' : impuestoCodigo,
+        tasa: formatXmlRateToPercent(getAttrValue(attrs, 'TasaOCuota')),
+      };
+    });
+  };
+
+  const getRetencionTasaMap = (xml: string) => {
+    const tasaMap = new Map<string, string>();
+    getRetencionesFromXml(xml).forEach((retencion) => {
+      if (!retencion.tasa) return;
+      if (retencion.impuestoCodigo && !tasaMap.has(retencion.impuestoCodigo)) {
+        tasaMap.set(retencion.impuestoCodigo, retencion.tasa);
+      }
+      if (retencion.impuesto && !tasaMap.has(retencion.impuesto)) {
+        tasaMap.set(retencion.impuesto, retencion.tasa);
+      }
+    });
+    return tasaMap;
   };
 
   const normalizeNumber = (value: string | number | undefined) => {
@@ -428,6 +476,11 @@ export default function EgresosRapidoPage() {
 
       const comprobanteAttrs = getTagAttributes(xmlString, 'Comprobante');
       const metodoPago = getAttrValue(comprobanteAttrs, 'MetodoPago') || '';
+      const tasasPorImpuesto = getRetencionTasaMap(xmlString);
+      const retencionesGlobales = getRetencionesFromXml(globalImpuestos);
+      const retenciones = retencionesGlobales.length > 0 ? retencionesGlobales : getRetencionesFromXml(xmlString);
+      const ivaRetenido = retenciones.find((retencion) => retencion.impuestoCodigo === '002' || retencion.impuesto === 'IVA');
+      const tasaRetencionIVA = ivaRetenido?.tasa || tasasPorImpuesto.get('002') || tasasPorImpuesto.get('IVA') || '';
 
       setPreviewData((prev) => ({
         ...prev,
@@ -437,6 +490,7 @@ export default function EgresosRapidoPage() {
           producto: defaults.producto,
           sucursal,
           segmento,
+          tasaRetencionIVA,
           regimenFiscal,
           metodoPago,
         },
@@ -530,7 +584,7 @@ export default function EgresosRapidoPage() {
           '';
 
         const globalImpuestos = getGlobalImpuestosSection(xmlString);
-        const traslados = Array.from(globalImpuestos.matchAll(/<(?:cfdi:)?Traslado\b([^>]*)>/gi));
+        const traslados = Array.from(globalImpuestos.matchAll(/<(?:[a-zA-Z_][\w.-]*:)?Traslado\b([^>]*)>/gi));
         const hasIva08 = traslados.some((match) => {
           const attrs = match[1] || '';
           const impuesto = getAttrValue(attrs, 'Impuesto');
@@ -574,6 +628,13 @@ export default function EgresosRapidoPage() {
           getAttrValue(comprobanteAttrs, 'Subtotal') ||
           String(fields.total ?? '');
 
+        const tasasPorImpuesto = getRetencionTasaMap(xmlString);
+        const retencionesGlobales = getRetencionesFromXml(globalImpuestos);
+        const retenciones = retencionesGlobales.length > 0 ? retencionesGlobales : getRetencionesFromXml(xmlString);
+        const ivaRetenido = retenciones.find((retencion) => retencion.impuestoCodigo === '002' || retencion.impuesto === 'IVA');
+        const tasaIvaPercent = ivaRetenido?.tasa || tasasPorImpuesto.get('002') || tasasPorImpuesto.get('IVA') || '';
+        const tasaRetencionIVA = Number(tasaIvaPercent.replace('%', ''));
+
         const payload = {
           empresaRutaOrName: selectedEmpresa.baseDatos || '',
           codConcepto: defaults.concepto,
@@ -588,6 +649,7 @@ export default function EgresosRapidoPage() {
             {
               unidades: 1,
               precio: normalizeNumber(subtotal),
+              tasaRetencionIVA: Number.isFinite(tasaRetencionIVA) ? tasaRetencionIVA : 0,
               codProdSer: defaults.producto,
               referencia: sucursal,
               segmento,
@@ -774,7 +836,7 @@ export default function EgresosRapidoPage() {
           </div>
         ) : filteredEgresos.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border bg-card">
-            <table className="w-full min-w-[920px] text-sm">
+            <table className="w-full min-w-[1040px] text-sm">
               <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2">
@@ -786,6 +848,7 @@ export default function EgresosRapidoPage() {
                   <th className="px-3 py-2">Monto</th>
                   <th className="px-3 py-2">Metodo pago</th>
                   <th className="px-3 py-2">Regimen fiscal</th>
+                  <th className="px-3 py-2">Tasa Ret. IVA</th>
                   <th className="px-3 py-2">Segmento</th>
                   <th className="px-3 py-2">Sucursal</th>
                 </tr>
@@ -813,6 +876,9 @@ export default function EgresosRapidoPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
                         {preview?.regimenFiscal || (preview?.status === 'loading' ? 'Cargando...' : '-')}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {preview?.tasaRetencionIVA || (preview?.status === 'loading' ? 'Cargando...' : '-')}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">
                         {preview?.segmento || (preview?.status === 'loading' ? 'Cargando...' : '-')}
