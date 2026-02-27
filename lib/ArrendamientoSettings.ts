@@ -35,6 +35,7 @@ const ARRENDAMIENTO_IVA08_OVERRIDES: Record<
 
 export const getArrendamientoPersonaTipo = (regimenFiscal: string): ArrendamientoPersonaTipo => {
   if (regimenFiscal === '612') return 'Fisica';
+  if (regimenFiscal === '606') return 'Fisica';
   if (regimenFiscal === '626') return 'Resico';
   return 'Moral';
 };

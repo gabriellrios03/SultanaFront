@@ -292,7 +292,9 @@ export default function EgresoDetallePage() {
   };
 
   const getGlobalImpuestosSection = (xml: string) => {
-    const matches = Array.from(xml.matchAll(/<(?:cfdi:)?Impuestos\b[\s\S]*?<\/(?:cfdi:)?Impuestos>/gi));
+    const matches = Array.from(
+      xml.matchAll(/<(?:[a-zA-Z_][\w.-]*:)?Impuestos\b[\s\S]*?<\/(?:[a-zA-Z_][\w.-]*:)?Impuestos>/gi)
+    );
     return matches.length > 0 ? matches[matches.length - 1][0] : '';
   };
 
@@ -300,6 +302,52 @@ export default function EgresoDetallePage() {
     const value = Number(tasa);
     if (!Number.isFinite(value)) return '';
     return `${(value * 100).toFixed(2)}%`;
+  };
+
+  const formatXmlRateToPercent = (tasaRaw: string) => {
+    const cleaned = String(tasaRaw || '').trim();
+    if (!cleaned) return '';
+
+    const value = Number(cleaned);
+    if (!Number.isFinite(value)) return '';
+
+    if (Math.abs(value) <= 1) {
+      const decimalPart = cleaned.split('.')[1] || '';
+      const scaledDecimals = Math.max(0, decimalPart.length - 2);
+      const scaled = (value * 100).toFixed(scaledDecimals).replace(/\.0+$|(?<=\.[0-9]*?)0+$/g, '').replace(/\.$/, '');
+      return `${scaled}%`;
+    }
+
+    const normalized = cleaned.replace(/\.0+$|(?<=\.[0-9]*?)0+$/g, '').replace(/\.$/, '');
+    return `${normalized}%`;
+  };
+
+  const getRetencionesFromXml = (xml: string) => {
+    if (!xml) return [] as Array<{ impuesto: string; tasa: string; importe: string; impuestoCodigo: string }>;
+    return Array.from(xml.matchAll(/<(?:[a-zA-Z_][\w.-]*:)?Retencion\b([^>]*)\/?>/gi)).map((match) => {
+      const attrs = match[1] || '';
+      const impuestoCodigo = getAttrValue(attrs, 'Impuesto');
+      return {
+        impuestoCodigo,
+        impuesto: impuestosMap[impuestoCodigo] || impuestoCodigo,
+        tasa: formatXmlRateToPercent(getAttrValue(attrs, 'TasaOCuota')),
+        importe: getAttrValue(attrs, 'Importe'),
+      };
+    });
+  };
+
+  const getRetencionTasaMap = (xml: string) => {
+    const tasaMap = new Map<string, string>();
+    getRetencionesFromXml(xml).forEach((retencion) => {
+      if (!retencion.tasa) return;
+      if (retencion.impuestoCodigo && !tasaMap.has(retencion.impuestoCodigo)) {
+        tasaMap.set(retencion.impuestoCodigo, retencion.tasa);
+      }
+      if (retencion.impuesto && !tasaMap.has(retencion.impuesto)) {
+        tasaMap.set(retencion.impuesto, retencion.tasa);
+      }
+    });
+    return tasaMap;
   };
 
   const impuestosMap: Record<string, string> = {
@@ -602,6 +650,19 @@ export default function EgresoDetallePage() {
 
   const selectedProductoCode = selectedProductoRecord ? getProductoCode(selectedProductoRecord) : '';
 
+  const productosFiltrados = useMemo(() => {
+    return productos
+      .map((item, index) => {
+        const option = item as Record<string, unknown>;
+        const value = getSelectValue(option, 'producto', index);
+        const label = getProductoNombre(option);
+        const code = getProductoCode(option);
+        const displayLabel = code ? `${code} - ${label}` : label;
+        return { value, displayLabel, index };
+      })
+      .filter((item) => matchesQuery(item.displayLabel, productoQuery));
+  }, [productos, productoQuery]);
+
   const canSend =
     !!selectedConcepto &&
     !!activeProvider &&
@@ -644,15 +705,38 @@ export default function EgresoDetallePage() {
     return parsed.toISOString();
   };
 
+  const tasaRetencionIVA = useMemo(() => {
+    const xmlString = getDisplayXml(xmlDetail);
+    if (!xmlString) return 0;
+
+    const globalImpuestos = getGlobalImpuestosSection(xmlString);
+    const tasasPorImpuesto = getRetencionTasaMap(xmlString);
+    const retencionesGlobales = getRetencionesFromXml(globalImpuestos);
+    const retenciones = retencionesGlobales.length > 0 ? retencionesGlobales : getRetencionesFromXml(xmlString);
+    const ivaRetenido = retenciones.find((retencion) => retencion.impuestoCodigo === '002' || retencion.impuesto === 'IVA');
+    const tasaIva = ivaRetenido?.tasa || tasasPorImpuesto.get('002') || tasasPorImpuesto.get('IVA') || '';
+    if (!tasaIva) return 0;
+
+    const tasa = Number(tasaIva.replace('%', ''));
+    if (Number.isFinite(tasa)) return tasa;
+
+    return 0;
+  }, [xmlDetail]);
+
   const subtotalValue = subtotalFromXml || computed.total;
   const contpaqiPayload = useMemo(() => {
-    const folioNumber = normalizeNumber(computed.folio);
+    const folioNumber = normalizeNumber(String(computed.folio ?? ''));
+    const fechaOriginal = String(computed.fecha ?? '');
+    const subtotalNormalizado =
+      typeof subtotalValue === 'string' || typeof subtotalValue === 'number'
+        ? subtotalValue
+        : String(subtotalValue ?? '');
     return {
       empresaRutaOrName: selectedEmpresa?.baseDatos || '',
       codConcepto: selectedConceptoCode || selectedConceptoLabel || '',
       serie: computed.serie || '',
       folio: typeof folioNumber === 'number' ? folioNumber : 0,
-      fecha: normalizeDate(computed.fecha) || normalizeDate(formatDateOnly(computed.fecha)) || '',
+      fecha: normalizeDate(fechaOriginal) || normalizeDate(formatDateOnly(fechaOriginal)) || '',
       codigoCteProv: selectedProviderRecord ? getProveedorCodigoCliente(selectedProviderRecord) : '',
       referencia: displaySucursal || '',
       asociarUUID: computed.uuid || '',
@@ -660,7 +744,8 @@ export default function EgresoDetallePage() {
       movimientos: [
         {
           unidades: 1,
-          precio: normalizeNumber(subtotalValue),
+          precio: normalizeNumber(subtotalNormalizado),
+          tasaRetencionIVA,
           codProdSer: selectedProductoCode || '',
           referencia: displaySucursal || '',
           segmento: displaySegmento || '',
@@ -681,6 +766,7 @@ export default function EgresoDetallePage() {
     selectedEmpresa?.guidDsl,
     selectedProviderRecord,
     subtotalValue,
+    tasaRetencionIVA,
   ]);
 
   const handleSendContpaqi = async () => {
@@ -714,6 +800,7 @@ export default function EgresoDetallePage() {
     const receptorAttrs = getTagAttributes(xmlString, 'Receptor');
     const comprobanteAttrs = getTagAttributes(xmlString, 'Comprobante');
     const globalImpuestos = getGlobalImpuestosSection(xmlString);
+    const tasasPorImpuesto = getRetencionTasaMap(xmlString);
 
     const conceptos = Array.from(xmlString.matchAll(/<(?:cfdi:)?Concepto\b([^>]*)>/gi)).map((match) => {
       const attrs = match[1] || '';
@@ -738,14 +825,15 @@ export default function EgresoDetallePage() {
       };
     });
 
-    const retenciones = Array.from(globalImpuestos.matchAll(/<(?:cfdi:)?Retencion\b([^>]*)>/gi)).map((match) => {
-      const attrs = match[1] || '';
-      const impuesto = getAttrValue(attrs, 'Impuesto');
-      return {
-        impuesto: impuestosMap[impuesto] || impuesto,
-        importe: getAttrValue(attrs, 'Importe'),
-      };
-    });
+    const retencionesGlobales = getRetencionesFromXml(globalImpuestos);
+    const retenciones = (retencionesGlobales.length > 0 ? retencionesGlobales : getRetencionesFromXml(xmlString)).map((retencion) => ({
+      ...retencion,
+      tasa:
+        retencion.tasa ||
+        tasasPorImpuesto.get(retencion.impuestoCodigo) ||
+        tasasPorImpuesto.get(retencion.impuesto) ||
+        '',
+    }));
 
     return {
       emisor: {
@@ -772,6 +860,33 @@ export default function EgresoDetallePage() {
       retenciones,
     };
   }, [xmlDetail]);
+
+  const retencionesSeparadas = useMemo(() => {
+    const totalsByImpuesto = new Map<string, { impuesto: string; tasa: string; importe: number }>();
+
+    cfdiVisual.retenciones.forEach((retencion) => {
+      const impuesto = String(retencion.impuesto || '').trim() || 'Retención';
+      const tasa = String(retencion.tasa || '').trim();
+      const importeRaw =
+        typeof retencion.importe === 'string' || typeof retencion.importe === 'number'
+          ? retencion.importe
+          : String(retencion.importe ?? '');
+      const importe = normalizeNumber(importeRaw);
+      if (!Number.isFinite(importe)) return;
+      const key = `${impuesto}|${tasa}`;
+      const current = totalsByImpuesto.get(key);
+      if (current) {
+        totalsByImpuesto.set(key, {
+          ...current,
+          importe: current.importe + importe,
+        });
+        return;
+      }
+      totalsByImpuesto.set(key, { impuesto, tasa, importe });
+    });
+
+    return Array.from(totalsByImpuesto.values());
+  }, [cfdiVisual.retenciones]);
 
   if (!detail) {
     return (
@@ -870,7 +985,7 @@ export default function EgresoDetallePage() {
                 <DataCell label="Regimen fiscal" value={getRegimenFiscalDescription(cfdiVisual.emisor.regimen)} small />
                 <DataCell label="Metodo de pago" value={cfdiVisual.comprobante.metodoPago || '-'} mono />
               </div>
-              {(subtotalFromXml || totalImpuestosTrasladados || totalImpuestosRetenidos || descuentoFromXml) && (
+              {(subtotalFromXml || totalImpuestosTrasladados || totalImpuestosRetenidos || descuentoFromXml || retencionesSeparadas.length > 0) && (
                 <div className="border-t px-4 py-4">
                   <div className="font-mono text-sm space-y-1.5">
                     {/* Subtotal */}
@@ -900,14 +1015,25 @@ export default function EgresoDetallePage() {
                       </>
                     )}
 
-                    {/* Total Retenciones (global del CFDI, no por concepto) */}
-                    {totalImpuestosRetenidos && (
+                    {/* Retenciones separadas por impuesto (global del CFDI) */}
+                    {(retencionesSeparadas.length > 0 || totalImpuestosRetenidos) && (
                       <>
                         <div className="border-b border-dashed border-border my-2" />
-                        <div className="flex items-center justify-between">
-                          <span className="text-orange-500">- Retenciones</span>
-                          <span className="text-orange-500 font-semibold">{formatTotalValue(totalImpuestosRetenidos)}</span>
-                        </div>
+                        {retencionesSeparadas.length > 0 ? (
+                          retencionesSeparadas.map((retencion) => (
+                            <div key={`retencion-resumen-${retencion.impuesto}-${retencion.tasa}`} className="flex items-center justify-between">
+                              <span className="text-orange-500">
+                                - Retención {retencion.impuesto}{retencion.tasa ? ` (${retencion.tasa})` : ''}
+                              </span>
+                              <span className="text-orange-500 font-semibold">{formatTotalValue(retencion.importe)}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <span className="text-orange-500">- Retenciones</span>
+                            <span className="text-orange-500 font-semibold">{formatTotalValue(totalImpuestosRetenidos)}</span>
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -1061,7 +1187,9 @@ export default function EgresoDetallePage() {
                           ))}
                           {cfdiVisual.retenciones.map((tax, index) => (
                             <div key={`retencion-${index}`} className="flex items-center justify-between">
-                              <span className="text-xs text-muted-foreground">Retencion {tax.impuesto}</span>
+                              <span className="text-xs text-muted-foreground">
+                                Retencion {tax.impuesto}{tax.tasa ? ` (${tax.tasa})` : ''}
+                              </span>
                               <span className="text-xs font-mono text-foreground">{tax.importe || '-'}</span>
                             </div>
                           ))}
@@ -1222,21 +1350,17 @@ export default function EgresoDetallePage() {
                               onKeyDown={(event) => event.stopPropagation()}
                             />
                           </div>
-                          {productos.map((item, index) => {
-                            const option = item as Record<string, unknown>;
-                            const value = getSelectValue(option, 'producto', index);
-                            const label = getProductoNombre(option);
-                            const code = getProductoCode(option);
-                            const displayLabel = code ? `${code} - ${label}` : label;
-                            if (!matchesQuery(displayLabel, productoQuery)) return null;
-                            return (
-                              <SelectItem key={`${value}-${index}`} value={value}>
-                                <span className="block max-w-full truncate" title={displayLabel}>
-                                  {displayLabel}
+                          {productosFiltrados.length === 0 ? (
+                            <div className="px-2 py-1 text-xs text-muted-foreground">Sin resultados</div>
+                          ) : (
+                            productosFiltrados.map((item) => (
+                              <SelectItem key={`${item.value}-${item.index}`} value={item.value}>
+                                <span className="block max-w-full truncate" title={item.displayLabel}>
+                                  {item.displayLabel}
                                 </span>
                               </SelectItem>
-                            );
-                          })}
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
